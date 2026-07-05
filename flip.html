@@ -157,6 +157,7 @@ let mpSelectedPlayers = new Set();
 let mpPendingInvites = [];
 let gameState = null;
 let gameSynced = false;
+let lastNotifiedEventKey = null;
 
 const MIN_INVITEES = 2; // host + 2 = minimum 3 players for Flip 7
 
@@ -206,6 +207,21 @@ function showToast(msg, ms = 2500) {
   setTimeout(() => t.classList.remove("show"), ms);
 }
 
+function notifyActionReceived(state) {
+  const me = getUsername();
+  const ev = state?.lastEvent;
+  if (!me || !ev) return;
+  if (ev.type !== "freeze" && ev.type !== "flip_three") return;
+  if (ev.target !== me || ev.from === me) return;
+
+  const key = `${ev.type}:${ev.from}:${ev.target}:${ev.card?.id || ""}`;
+  if (key === lastNotifiedEventKey) return;
+  lastNotifiedEventKey = key;
+
+  const cardName = ev.card?.label || (ev.type === "freeze" ? "FREEZE" : "FLIP 3");
+  showToast(`${ev.from.toUpperCase()} sent you ${cardName}`, 4000);
+}
+
 function showView(name) {
   document.getElementById("view-home").style.display = name === "home" ? "flex" : "none";
   document.getElementById("view-game").style.display = name === "game" ? "flex" : "none";
@@ -229,6 +245,7 @@ function clearActiveRoom() {
   localStorage.removeItem("flip_room_role");
   mpRoomId = null;
   mpRole = null;
+  lastNotifiedEventKey = null;
   document.getElementById("return-game-btn").style.display = "none";
   const banner = document.getElementById("mp-active-game-banner");
   if (banner) banner.style.display = "none";
@@ -745,6 +762,7 @@ function onGameState(state) {
   document.getElementById("deck-info").textContent = `Cards in deck: ${state.deckCount}`;
 
   const me = getUsername();
+  notifyActionReceived(state);
   const turnPlayer = state.players[state.turnIndex];
   document.getElementById("game-turn").textContent = state.phase === "playing" && turnPlayer
     ? `${turnPlayer.username.toUpperCase()}'s turn` : "";
