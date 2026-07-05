@@ -222,6 +222,28 @@ function notifyActionReceived(state) {
   showToast(`${ev.from.toUpperCase()} sent you ${cardName}`, 4000);
 }
 
+function notifySecondChancePlayed(state) {
+  const me = getUsername();
+  const ev = state?.lastEvent;
+  if (!me || !ev || ev.type !== "second_chance_used") return;
+
+  const key = `second_chance_used:${ev.username}:${ev.card?.id || ""}`;
+  if (key === lastNotifiedEventKey) return;
+  lastNotifiedEventKey = key;
+
+  const cardName = ev.card?.label || "2nd CHANCE";
+  if (ev.username === me) {
+    showToast(`You played ${cardName}`, 4000);
+  } else {
+    showToast(`${ev.username.toUpperCase()} played ${cardName}`, 4000);
+  }
+}
+
+function notifyGameEvents(state) {
+  notifyActionReceived(state);
+  notifySecondChancePlayed(state);
+}
+
 function showView(name) {
   document.getElementById("view-home").style.display = name === "home" ? "flex" : "none";
   document.getElementById("view-game").style.display = name === "game" ? "flex" : "none";
