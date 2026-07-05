@@ -287,6 +287,11 @@ function mpStartBgHeartbeat() {
   mpHeartbeatTimer = setInterval(mpSendHeartbeat, 5000);
 }
 
+function mpStopBgHeartbeat() {
+  clearInterval(mpHeartbeatTimer);
+  mpHeartbeatTimer = null;
+}
+
 async function mpSendHeartbeat() {
   const u = getUsername();
   if (!u) return;
@@ -300,7 +305,7 @@ async function mpSendHeartbeat() {
 }
 
 document.addEventListener("visibilitychange", () => {
-  if (document.hidden) clearInterval(mpHeartbeatTimer);
+  if (document.hidden) mpStopBgHeartbeat();
   else if (getUsername()) mpStartBgHeartbeat();
 });
 
@@ -318,6 +323,7 @@ async function openMpModal() {
   mpShowMpView("lobby");
   document.getElementById("mp-modal").classList.add("open");
   mpSubscribeLobby();
+  mpStartBgHeartbeat();
   mpLobbyRefreshTimer = setInterval(mpLoadLobbyPlayers, 10000);
   mpRenderInvitations();
   await mpLoadLobbyPlayers();
