@@ -49,7 +49,7 @@ export default async function handler(req, res) {
         ) mp ON mp.username = u.username
         ORDER BY
           CASE
-            WHEN l.last_seen > NOW() - INTERVAL '30 seconds' THEN 0
+            WHEN l.last_seen > NOW() - INTERVAL '60 seconds' THEN 0
             WHEN mp.username IS NOT NULL THEN 1
             ELSE 2
           END,
