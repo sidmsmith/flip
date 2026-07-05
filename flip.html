@@ -142,7 +142,7 @@ const STATS_URL = `${API_ORIGIN}/api/flip-stats`;
 const USERS_URL = `${API_ORIGIN}/api/flip-users`;
 
 const CARD_COLORS = {
-  number: {1:"#b8b8b8",2:"#b8e986",3:"#ff6b9d",4:"#4ecdc4",5:"#6bcb77",6:"#c77dff",7:"#ff8a65",8:"#d4ed91",9:"#ffb347",10:"#ff6b6b",11:"#74b9ff",12:"#636e72"},
+  number: {0:"#e8e8e8",1:"#b8b8b8",2:"#b8e986",3:"#ff6b9d",4:"#4ecdc4",5:"#6bcb77",6:"#c77dff",7:"#ff8a65",8:"#d4ed91",9:"#ffb347",10:"#ff6b6b",11:"#74b9ff",12:"#636e72"},
   bonus: "#ffb347", multiplier: "#ffb347", freeze: "#74b9ff", flip_three: "#ffe066", second_chance: "#ff6b6b"
 };
 
@@ -746,7 +746,7 @@ function cardColor(card) {
 
 function cardTextColor(card) {
   if (card.type !== "number") return "#1a1a1a";
-  const darkTextValues = [1, 2, 8];
+  const darkTextValues = [0, 1, 2, 8];
   return darkTextValues.includes(card.value) ? "#1a1a1a" : "#fff";
 }
 
