@@ -205,6 +205,49 @@ header {
 
 .action-bar .btn { min-width: 120px; padding: 14px 24px; font-size: 1rem; }
 
+.action-bar .btn-hit.active {
+  background: #6bcb77;
+  border-color: #6bcb77;
+  color: #1a1a2e;
+}
+
+.action-bar .btn-stay.active {
+  background: #ef4444;
+  border-color: #ef4444;
+  color: #fff;
+}
+
+.action-bar .btn-hit.disabled,
+.action-bar .btn-stay.disabled {
+  background: #3a3a3c;
+  border-color: #4b4b4d;
+  color: #6b7280;
+}
+
+.player-row.busted {
+  opacity: 0.85;
+}
+
+.player-row.busted .card-row {
+  position: relative;
+}
+
+.player-row.busted .playing-card {
+  filter: grayscale(0.65) brightness(0.85);
+  opacity: 0.75;
+}
+
+.player-row.busted .player-name::after {
+  content: " — BUST";
+  color: var(--accent);
+  font-size: 0.75rem;
+}
+
+.playing-card.bust-card {
+  outline: 3px solid var(--accent);
+  outline-offset: 1px;
+}
+
 .action-prompt {
   background: var(--surface2);
   border-radius: var(--radius);

@@ -39,8 +39,8 @@
       <div class="target-btns" id="target-btns"></div>
     </div>
     <div class="action-bar" id="action-bar">
-      <button class="btn btn-accent" id="hit-btn" disabled>HIT</button>
-      <button class="btn" id="stay-btn" disabled>STAY</button>
+      <button class="btn btn-stay disabled" id="stay-btn" disabled>STAY</button>
+      <button class="btn btn-hit disabled" id="hit-btn" disabled>HIT</button>
       <button class="btn btn-primary" id="next-round-btn" style="display:none">NEXT ROUND</button>
     </div>
   </div>
@@ -707,12 +707,33 @@ function cardColor(card) {
   return CARD_COLORS[card.type] || "#888";
 }
 
-function renderCard(card) {
+function cardTextColor(card) {
+  if (card.type !== "number") return "#1a1a1a";
+  const darkTextValues = [1, 2, 8];
+  return darkTextValues.includes(card.value) ? "#1a1a1a" : "#fff";
+}
+
+function displayRoundPoints(p, phase) {
+  if (phase === "round_end" || phase === "game_over") {
+    return p.roundScore ?? 0;
+  }
+  return p.tableauScore ?? 0;
+}
+
+function setActionButtonStyles(canAct) {
+  const hitBtn = document.getElementById("hit-btn");
+  const stayBtn = document.getElementById("stay-btn");
+  hitBtn.className = "btn btn-hit " + (canAct ? "active" : "disabled");
+  stayBtn.className = "btn btn-stay " + (canAct ? "active" : "disabled");
+}
+
+function renderCard(card, opts = {}) {
   const el = document.createElement("div");
   el.className = "playing-card " + (card.type === "bonus" ? "bonus" : card.type === "multiplier" ? "multiplier" : card.type !== "number" ? "action" : "");
+  if (opts.bustCard) el.classList.add("bust-card");
   el.style.background = cardColor(card);
   el.textContent = card.label || String(card.value);
-  if (card.type === "number") el.style.color = card.value <= 2 ? "#333" : "#fff";
+  el.style.color = cardTextColor(card);
   return el;
 }
 
@@ -733,24 +754,34 @@ function onGameState(state) {
   const sb = document.getElementById("scoreboard");
   sb.innerHTML = "";
   state.players.forEach(p => {
+    const pts = displayRoundPoints(p, state.phase);
     const chip = document.createElement("div");
     chip.className = "score-chip" + (p.username === me ? " me" : "") + (turnPlayer?.username === p.username && state.phase === "playing" ? " turn" : "");
-    chip.textContent = `${p.username.toUpperCase()}: ${p.totalScore}${p.roundScore ? ` (+${p.roundScore})` : ""}`;
+    chip.textContent = p.totalScore > 0
+      ? `${p.username.toUpperCase()} (${pts}) · total ${p.totalScore}`
+      : `${p.username.toUpperCase()} (${pts})`;
     sb.appendChild(chip);
   });
+
+  const bustCardId = state.lastEvent?.type === "bust" ? state.lastEvent.card?.id : null;
+  const bustUser = state.lastEvent?.type === "bust" ? state.lastEvent.username : null;
 
   const table = document.getElementById("table-area");
   table.innerHTML = "";
   state.players.forEach(p => {
+    const pts = displayRoundPoints(p, state.phase);
     const row = document.createElement("div");
     row.className = "player-row " + p.status + (p.username === me ? " me" : "");
     const hdr = document.createElement("div");
     hdr.className = "player-hdr";
-    hdr.innerHTML = `<span class="player-name">${p.username}${p.flip7ThisRound ? " ★ FLIP 7" : ""}</span><span class="player-status">${p.status}${p.hasSecondChance ? " · 2nd chance" : ""}</span>`;
+    hdr.innerHTML = `<span class="player-name">${p.username.toUpperCase()} (${pts})${p.flip7ThisRound ? " ★ FLIP 7" : ""}</span><span class="player-status">${p.status === "busted" ? "busted" : p.status}${p.hasSecondChance ? " · 2nd chance" : ""}</span>`;
     row.appendChild(hdr);
     const cards = document.createElement("div");
     cards.className = "card-row";
-    p.cards.forEach(c => cards.appendChild(renderCard(c)));
+    p.cards.forEach(c => {
+      const isBustCard = p.status === "busted" && p.username === bustUser && c.id === bustCardId;
+      cards.appendChild(renderCard(c, { bustCard: isBustCard }));
+    });
     if (p.hasSecondChance) {
       const sc = document.createElement("div");
       sc.className = "playing-card action";
@@ -780,14 +811,17 @@ function onGameState(state) {
 
   if (state.phase === "round_end") {
     hitBtn.disabled = stayBtn.disabled = true;
+    setActionButtonStyles(false);
     if (mpRole === "host" && !state.winner) {
       nextBtn.style.display = "inline-block";
       hitBtn.style.display = stayBtn.style.display = "none";
     }
   } else if (state.phase === "game_over") {
     hitBtn.disabled = stayBtn.disabled = true;
+    setActionButtonStyles(false);
   } else if (state.mustResolveAction && state.pendingAction) {
     hitBtn.disabled = stayBtn.disabled = true;
+    setActionButtonStyles(false);
     prompt.style.display = "block";
     const actionLabel = state.pendingAction.type === "freeze" ? "FREEZE" : "FLIP THREE";
     document.getElementById("action-prompt-text").textContent =
@@ -803,6 +837,7 @@ function onGameState(state) {
     });
   } else if (state.pendingAction && !state.mustResolveAction) {
     hitBtn.disabled = stayBtn.disabled = true;
+    setActionButtonStyles(false);
     const who = state.pendingAction.fromUsername?.toUpperCase() || "?";
     document.getElementById("game-turn").textContent =
       `Waiting for ${who} to play ${state.pendingAction.type === "freeze" ? "FREEZE" : "FLIP THREE"}…`;
@@ -810,6 +845,7 @@ function onGameState(state) {
     const canAct = state.isMyTurn && state.phase === "playing";
     hitBtn.disabled = !canAct;
     stayBtn.disabled = !canAct;
+    setActionButtonStyles(canAct);
   }
 }
 
