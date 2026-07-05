@@ -192,9 +192,7 @@ function personalizeState(state) {
   if (state.mustResolveAction && pending) {
     state.legalTargets =
       pending.canTarget ||
-      state.players
-        .filter((p) => p.status === "active" && p.username !== me)
-        .map((p) => p.username);
+      state.players.filter((p) => p.status === "active").map((p) => p.username);
   } else {
     state.legalTargets = [];
   }
@@ -825,13 +823,13 @@ function onGameState(state) {
     prompt.style.display = "block";
     const actionLabel = state.pendingAction.type === "freeze" ? "FREEZE" : "FLIP THREE";
     document.getElementById("action-prompt-text").textContent =
-      `You drew ${actionLabel} — choose a target:`;
+      `You drew ${actionLabel} — keep it for yourself or send to another active player:`;
     const tb = document.getElementById("target-btns");
     tb.innerHTML = "";
     (state.legalTargets || []).forEach(t => {
       const b = document.createElement("button");
       b.className = "btn";
-      b.textContent = t.toUpperCase();
+      b.textContent = t === me ? `${t.toUpperCase()} (KEEP)` : t.toUpperCase();
       b.addEventListener("click", () => gameAction("play_action", t));
       tb.appendChild(b);
     });
