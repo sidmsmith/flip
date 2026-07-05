@@ -752,12 +752,9 @@ function onGameState(state) {
   const sb = document.getElementById("scoreboard");
   sb.innerHTML = "";
   state.players.forEach(p => {
-    const pts = displayRoundPoints(p, state.phase);
     const chip = document.createElement("div");
     chip.className = "score-chip" + (p.username === me ? " me" : "") + (turnPlayer?.username === p.username && state.phase === "playing" ? " turn" : "");
-    chip.textContent = p.totalScore > 0
-      ? `${p.username.toUpperCase()} (${pts}) · total ${p.totalScore}`
-      : `${p.username.toUpperCase()} (${pts})`;
+    chip.textContent = `${p.username.toUpperCase()} (${p.totalScore})`;
     sb.appendChild(chip);
   });
 
