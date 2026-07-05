@@ -784,7 +784,7 @@ function onGameState(state) {
   document.getElementById("deck-info").textContent = `Cards in deck: ${state.deckCount}`;
 
   const me = getUsername();
-  notifyActionReceived(state);
+  notifyGameEvents(state);
   const turnPlayer = state.players[state.turnIndex];
   document.getElementById("game-turn").textContent = state.phase === "playing" && turnPlayer
     ? `${turnPlayer.username.toUpperCase()}'s turn` : "";
