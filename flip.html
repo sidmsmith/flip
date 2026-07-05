@@ -1,0 +1,717 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Flip 7</title>
+<link rel="stylesheet" href="flip.css">
+</head>
+<body>
+<div id="app">
+  <header>
+    <div class="logo">FLIP <span>7</span></div>
+    <div class="hdr-btns">
+      <button class="btn" id="stats-btn">STATS</button>
+      <button class="btn" id="user-btn">👤</button>
+    </div>
+  </header>
+
+  <div id="view-home">
+    <div class="home-title">Push Your Luck</div>
+    <p class="home-sub">Collect 7 unique numbers to Flip 7. First to 200 points wins. Play with 3–6 friends online.</p>
+    <div class="user-badge" id="home-user">Set your name to play</div>
+    <button class="btn btn-primary" id="find-game-btn">FIND GAME</button>
+  </div>
+
+  <div id="view-game">
+    <div class="game-meta">
+      <span id="game-round">Round 1</span>
+      <span id="game-turn"></span>
+      <span id="game-target">Target: 200</span>
+    </div>
+    <div class="scoreboard" id="scoreboard"></div>
+    <div class="table-area" id="table-area"></div>
+    <div class="deck-info" id="deck-info">Cards in deck: —</div>
+    <div class="action-prompt" id="action-prompt" style="display:none">
+      <p id="action-prompt-text"></p>
+      <div class="target-btns" id="target-btns"></div>
+    </div>
+    <div class="action-bar" id="action-bar">
+      <button class="btn btn-accent" id="hit-btn" disabled>HIT</button>
+      <button class="btn" id="stay-btn" disabled>STAY</button>
+      <button class="btn btn-primary" id="next-round-btn" style="display:none">NEXT ROUND</button>
+    </div>
+  </div>
+
+  <div id="view-stats">
+    <button class="btn" id="stats-back">← BACK</button>
+    <div class="stat-section-title">YOUR STATS</div>
+    <div class="stat-grid" id="stat-me"></div>
+    <div class="stat-section-title">OVERALL</div>
+    <div class="stat-grid" id="stat-overall"></div>
+    <div class="stat-section-title">MULTIPLAYER</div>
+    <div class="stat-grid" id="stat-mp"></div>
+    <div id="stat-h2h"></div>
+  </div>
+</div>
+
+<!-- User modal -->
+<div class="modal-overlay" id="user-modal">
+  <div class="modal-card">
+    <div class="modal-hdr">
+      <span class="modal-title">WHO ARE YOU?</span>
+      <button class="modal-x" id="user-close">✕</button>
+    </div>
+    <div class="modal-body">
+      <input id="user-input" type="text" maxlength="32" autocomplete="off" placeholder="ENTER NAME">
+      <div class="mp-sec">EXISTING PLAYERS</div>
+      <div id="user-chips"></div>
+      <button class="btn btn-primary" id="user-save" style="width:100%">SAVE</button>
+    </div>
+  </div>
+</div>
+
+<!-- Multiplayer modal -->
+<div class="modal-overlay" id="mp-modal">
+  <div class="modal-card">
+    <div id="mp-v-lobby">
+      <div class="modal-hdr">
+        <span class="modal-title">FIND GAME</span>
+        <button class="modal-x" id="mp-close">✕</button>
+      </div>
+      <div class="modal-body">
+        <div id="mp-inv-area"></div>
+        <div class="mp-hint" id="mp-lobby-status">Looking for players...</div>
+        <div class="mp-sec" id="mp-sec-online" style="display:none">ONLINE NOW</div>
+        <div id="mp-lobby-list"></div>
+        <button class="btn btn-primary" id="mp-invite-btn" style="width:100%;margin-top:12px" disabled>INVITE SELECTED</button>
+      </div>
+    </div>
+    <div id="mp-v-waiting" style="display:none">
+      <div class="modal-hdr">
+        <span class="modal-title">WAITING</span>
+        <button class="btn" id="mp-cancel-btn">CANCEL</button>
+      </div>
+      <div class="modal-body">
+        <div id="mp-wait-list"></div>
+        <p class="mp-hint">Need 3–6 players to start Flip 7</p>
+        <button class="btn btn-primary" id="mp-start-btn" style="width:100%" disabled>START GAME</button>
+      </div>
+    </div>
+    <div id="mp-v-accepted" style="display:none">
+      <div class="modal-hdr"><span class="modal-title">GET READY</span></div>
+      <div class="modal-body">
+        <p class="mp-hint" id="mp-accepted-msg">Waiting for host...</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Result modal -->
+<div class="modal-overlay" id="result-modal">
+  <div class="modal-card">
+    <div class="modal-body">
+      <div id="result-title"></div>
+      <div id="result-body"></div>
+      <button class="btn btn-primary" id="result-close" style="width:100%">OK</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const API_ORIGIN = location.hostname === "localhost" || location.hostname === "127.0.0.1"
+  ? "" : "https://flip7.vercel.app";
+const ABLY_KEY = "ojJiew.TwVtNg:Cb6XcfElKgIpu-yNqlWVv3-ayRWw2vjo2JTH2w43mKk";
+const HEARTBEAT_URL = `${API_ORIGIN}/api/flip-heartbeat`;
+const ROOM_URL = `${API_ORIGIN}/api/flip-room`;
+const GAME_URL = `${API_ORIGIN}/api/flip-game`;
+const SYNC_URL = `${API_ORIGIN}/api/flip-sync`;
+const STATS_URL = `${API_ORIGIN}/api/flip-stats`;
+const USERS_URL = `${API_ORIGIN}/api/flip-users`;
+
+const CARD_COLORS = {
+  number: {1:"#b8b8b8",2:"#b8e986",3:"#ff6b9d",4:"#4ecdc4",5:"#6bcb77",6:"#c77dff",7:"#ff8a65",8:"#d4ed91",9:"#ffb347",10:"#ff6b6b",11:"#74b9ff",12:"#636e72"},
+  bonus: "#ffb347", multiplier: "#ffb347", freeze: "#74b9ff", flip_three: "#ffe066", second_chance: "#ff6b6b"
+};
+
+let mpRoomId = null;
+let mpRole = null;
+let mpAbly = null;
+let mpLobbyChannel = null;
+let mpRoomChannel = null;
+let mpHeartbeatTimer = null;
+let mpLobbyRefreshTimer = null;
+let mpSelectedPlayers = new Set();
+let mpPendingInvites = [];
+let gameState = null;
+let gameSynced = false;
+
+function getUsername() {
+  return (localStorage.getItem("flip_username") || "").trim().toLowerCase();
+}
+
+function showToast(msg, ms = 2500) {
+  const t = document.getElementById("toast");
+  t.textContent = msg;
+  t.classList.add("show");
+  setTimeout(() => t.classList.remove("show"), ms);
+}
+
+function showView(name) {
+  document.getElementById("view-home").style.display = name === "home" ? "flex" : "none";
+  document.getElementById("view-game").style.display = name === "game" ? "flex" : "none";
+  document.getElementById("view-stats").style.display = name === "stats" ? "flex" : "none";
+}
+
+function updateHomeUser() {
+  const u = getUsername();
+  document.getElementById("home-user").textContent = u ? u.toUpperCase() : "Set your name to play";
+}
+
+// ── User ─────────────────────────────────────────────────────────────────────
+function openUserModal() {
+  document.getElementById("user-input").value = getUsername();
+  document.getElementById("user-modal").classList.add("open");
+  loadUserChips();
+}
+
+async function loadUserChips() {
+  const el = document.getElementById("user-chips");
+  el.innerHTML = "";
+  try {
+    const r = await fetch(USERS_URL);
+    const d = await r.json();
+    (d.users || []).forEach(u => {
+      const chip = document.createElement("button");
+      chip.className = "user-chip";
+      chip.textContent = u.toUpperCase();
+      chip.addEventListener("click", () => { document.getElementById("user-input").value = u; });
+      el.appendChild(chip);
+    });
+  } catch (_) {}
+}
+
+function saveUsername() {
+  const raw = document.getElementById("user-input").value.trim().slice(0, 32);
+  if (!raw) return;
+  localStorage.setItem("flip_username", raw.toLowerCase());
+  document.getElementById("user-modal").classList.remove("open");
+  updateHomeUser();
+  mpLoadAbly().then(() => { mpSubscribeLobby(); mpStartBgHeartbeat(); }).catch(() => {});
+}
+
+document.getElementById("user-btn").addEventListener("click", openUserModal);
+document.getElementById("user-close").addEventListener("click", () => document.getElementById("user-modal").classList.remove("open"));
+document.getElementById("user-save").addEventListener("click", saveUsername);
+document.getElementById("user-input").addEventListener("keydown", e => { if (e.key === "Enter") saveUsername(); });
+
+// ── Ably ─────────────────────────────────────────────────────────────────────
+function mpLoadAbly() {
+  return new Promise((resolve, reject) => {
+    if (window.Ably) { resolve(); return; }
+    const s = document.createElement("script");
+    s.src = "https://cdn.ably.com/lib/ably.min-2.js";
+    s.onload = resolve;
+    s.onerror = reject;
+    document.head.appendChild(s);
+  }).then(() => {
+    if (!mpAbly) mpAbly = new Ably.Realtime({ key: ABLY_KEY });
+  });
+}
+
+function mpSubscribeLobby() {
+  if (mpLobbyChannel) return;
+  mpLobbyChannel = mpAbly.channels.get("flip-lobby");
+  mpLobbyChannel.subscribe("lobby-update", () => {
+    if (document.getElementById("mp-modal").classList.contains("open")) mpLoadLobbyPlayers();
+  });
+  mpLobbyChannel.subscribe("invite", msg => {
+    const d = JSON.parse(msg.data);
+    if (d.invitee !== getUsername()) return;
+    if (mpRoomId) return;
+    if (mpPendingInvites.some(i => i.room_id === d.room_id)) return;
+    mpPendingInvites.push({ host: d.host, room_id: d.room_id });
+    mpSubscribeRoom(d.room_id);
+    if (!document.getElementById("mp-modal").classList.contains("open")) openMpModal();
+    else mpRenderInvitations();
+  });
+  mpLobbyChannel.subscribe("room-abandoned", msg => {
+    const d = JSON.parse(msg.data);
+    mpPendingInvites = mpPendingInvites.filter(i => i.room_id !== d.room_id);
+    if (mpRoomId === d.room_id) { mpRoomId = null; mpRole = null; showView("home"); }
+    mpRenderInvitations();
+  });
+}
+
+function mpSubscribeRoom(roomId) {
+  if (mpRoomChannel?.name === `flip-room-${roomId}`) return;
+  if (mpRoomChannel) mpRoomChannel.unsubscribe();
+  mpRoomChannel = mpAbly.channels.get(`flip-room-${roomId}`);
+  mpRoomChannel.subscribe("player-status", msg => {
+    const d = JSON.parse(msg.data);
+    if (mpRole === "host") mpRenderWaitList(d.players);
+    else mpUpdateAccepted(d.players);
+  });
+  mpRoomChannel.subscribe("game-start", msg => {
+    const d = JSON.parse(msg.data);
+    onGameState(d.state);
+    document.getElementById("mp-modal").classList.remove("open");
+    showView("game");
+  });
+  mpRoomChannel.subscribe("state-update", msg => {
+    const d = JSON.parse(msg.data);
+    onGameState(d.state);
+  });
+  mpRoomChannel.subscribe("round-end", msg => {
+    const d = JSON.parse(msg.data);
+    onGameState(d.state);
+    showRoundResult(d.state);
+  });
+  mpRoomChannel.subscribe("game-over", msg => {
+    const d = JSON.parse(msg.data);
+    onGameState(d.state);
+    showGameOver(d.state, d.winner);
+  });
+  mpRoomChannel.subscribe("room-abandoned", () => {
+    mpRoomId = null; mpRole = null; gameState = null;
+    showView("home");
+    showToast("Room was abandoned");
+  });
+}
+
+function mpStartBgHeartbeat() {
+  if (mpHeartbeatTimer) return;
+  mpSendHeartbeat();
+  mpHeartbeatTimer = setInterval(mpSendHeartbeat, 5000);
+}
+
+async function mpSendHeartbeat() {
+  const u = getUsername();
+  if (!u) return;
+  try {
+    await fetch(HEARTBEAT_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username: u })
+    });
+  } catch (_) {}
+}
+
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) clearInterval(mpHeartbeatTimer);
+  else if (getUsername()) mpStartBgHeartbeat();
+});
+
+// ── Lobby ────────────────────────────────────────────────────────────────────
+function mpShowMpView(v) {
+  document.getElementById("mp-v-lobby").style.display = v === "lobby" ? "block" : "none";
+  document.getElementById("mp-v-waiting").style.display = v === "waiting" ? "block" : "none";
+  document.getElementById("mp-v-accepted").style.display = v === "accepted" ? "block" : "none";
+}
+
+async function openMpModal() {
+  await mpLoadAbly();
+  if (!getUsername()) { openUserModal(); return; }
+  mpSelectedPlayers.clear();
+  mpShowMpView("lobby");
+  document.getElementById("mp-modal").classList.add("open");
+  mpSubscribeLobby();
+  mpLobbyRefreshTimer = setInterval(mpLoadLobbyPlayers, 10000);
+  mpRenderInvitations();
+  await mpLoadLobbyPlayers();
+}
+
+function closeMpModal() {
+  document.getElementById("mp-modal").classList.remove("open");
+  clearInterval(mpLobbyRefreshTimer);
+}
+
+async function mpLoadLobbyPlayers() {
+  try {
+    const r = await fetch(HEARTBEAT_URL);
+    const d = await r.json();
+    const me = getUsername();
+    const others = (d.players || []).filter(p => p.username !== me);
+    const statusEl = document.getElementById("mp-lobby-status");
+    const secEl = document.getElementById("mp-sec-online");
+    const listEl = document.getElementById("mp-lobby-list");
+    listEl.innerHTML = "";
+    if (!others.length) {
+      statusEl.style.display = "block";
+      statusEl.textContent = "No other players online.";
+      secEl.style.display = "none";
+    } else {
+      statusEl.style.display = "none";
+      secEl.style.display = "block";
+      others.forEach(({ username: p, status }) => {
+        const avail = status === "available";
+        const row = document.createElement("div");
+        row.className = "mp-prow" + (avail && mpSelectedPlayers.has(p) ? " sel" : "") + (avail ? "" : " unavail");
+        row.innerHTML = `<div class="mp-prow-left"><span class="mp-dot ${status}"></span><span class="mp-prow-name">${p.toUpperCase()}</span></div><div><span class="mp-prow-st">${status}</span> <span class="mp-prow-chk">✓</span></div>`;
+        if (avail) {
+          row.addEventListener("click", () => {
+            if (mpSelectedPlayers.has(p)) mpSelectedPlayers.delete(p);
+            else {
+              if (mpSelectedPlayers.size >= 5) { showToast("Max 5 invitees (6 players total)"); return; }
+              mpSelectedPlayers.add(p);
+            }
+            row.classList.toggle("sel", mpSelectedPlayers.has(p));
+            document.getElementById("mp-invite-btn").disabled = mpSelectedPlayers.size === 0;
+          });
+        }
+        listEl.appendChild(row);
+      });
+    }
+    document.getElementById("mp-invite-btn").disabled = mpSelectedPlayers.size === 0;
+  } catch (_) {}
+}
+
+function mpRenderInvitations() {
+  const area = document.getElementById("mp-inv-area");
+  area.innerHTML = "";
+  mpPendingInvites.forEach((inv, idx) => {
+    const banner = document.createElement("div");
+    banner.className = "mp-inv-banner";
+    banner.innerHTML = `<div class="mp-inv-text">${inv.host.toUpperCase()} invited you!</div><div class="mp-inv-row"><button class="mp-acc-btn">ACCEPT</button><button class="mp-dec-btn">DECLINE</button></div>`;
+    banner.querySelector(".mp-acc-btn").addEventListener("click", () => mpAcceptInvite(inv));
+    banner.querySelector(".mp-dec-btn").addEventListener("click", () => mpDeclineInvite(inv, idx));
+    area.appendChild(banner);
+  });
+}
+
+async function mpAcceptInvite(inv) {
+  mpPendingInvites = [];
+  mpRenderInvitations();
+  mpRoomId = inv.room_id;
+  mpRole = "player";
+  mpSubscribeRoom(inv.room_id);
+  document.getElementById("mp-accepted-msg").textContent = `Waiting for ${inv.host.toUpperCase()} to start...`;
+  mpShowMpView("accepted");
+  await fetch(ROOM_URL, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "accept", room_id: inv.room_id, username: getUsername() })
+  });
+}
+
+async function mpDeclineInvite(inv, idx) {
+  mpPendingInvites.splice(idx, 1);
+  mpRenderInvitations();
+  await fetch(ROOM_URL, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "decline", room_id: inv.room_id, username: getUsername() })
+  });
+}
+
+async function mpInvitePlayers() {
+  const invitees = [...mpSelectedPlayers];
+  const r = await fetch(ROOM_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username: getUsername(), invitees })
+  });
+  const d = await r.json();
+  if (!r.ok) { showToast(d.error || "Could not create room"); return; }
+  mpRoomId = d.room_id;
+  mpRole = "host";
+  mpSubscribeRoom(mpRoomId);
+  mpRenderWaitList([
+    { username: getUsername(), role: "host", status: "accepted" },
+    ...invitees.map(p => ({ username: p, role: "player", status: "invited" }))
+  ]);
+  mpShowMpView("waiting");
+}
+
+function mpRenderWaitList(players) {
+  const list = document.getElementById("mp-wait-list");
+  list.innerHTML = "";
+  let accepted = 0;
+  players.forEach(p => {
+    const row = document.createElement("div");
+    row.className = "mp-wrow";
+    const lbl = { accepted: "✓ Ready", invited: "Waiting...", declined: "Declined", playing: "Playing" }[p.status] || p.status;
+    row.innerHTML = `<span>${p.username.toUpperCase()}${p.role === "host" ? " (HOST)" : ""}</span><span class="mp-wst ${p.status === "accepted" ? "ok" : "wait"}">${lbl}</span>`;
+    list.appendChild(row);
+    if (p.status === "accepted" && p.role !== "host") accepted++;
+  });
+  const total = players.filter(p => p.status !== "declined").length;
+  document.getElementById("mp-start-btn").disabled = accepted === 0 || total < 3;
+}
+
+function mpUpdateAccepted(players) {
+  const allReady = players.every(p => p.status === "accepted" || p.role === "host");
+  document.getElementById("mp-accepted-msg").textContent = allReady
+    ? "All players ready! Waiting for host..."
+    : "Waiting for players to accept...";
+}
+
+async function mpStartGame() {
+  const r = await fetch(GAME_URL, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "start", room_id: mpRoomId, username: getUsername() })
+  });
+  const d = await r.json();
+  if (!r.ok) { showToast(d.error || "Could not start"); return; }
+  onGameState(d.state);
+  document.getElementById("mp-modal").classList.remove("open");
+  showView("game");
+}
+
+async function mpCancelRoom() {
+  if (mpRoomId) {
+    await fetch(ROOM_URL, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "abandon", room_id: mpRoomId, username: getUsername() })
+    });
+    mpRoomId = null; mpRole = null;
+  }
+  mpShowMpView("lobby");
+  await mpLoadLobbyPlayers();
+}
+
+document.getElementById("find-game-btn").addEventListener("click", openMpModal);
+document.getElementById("mp-close").addEventListener("click", closeMpModal);
+document.getElementById("mp-invite-btn").addEventListener("click", mpInvitePlayers);
+document.getElementById("mp-start-btn").addEventListener("click", mpStartGame);
+document.getElementById("mp-cancel-btn").addEventListener("click", mpCancelRoom);
+
+// ── Game UI ──────────────────────────────────────────────────────────────────
+function cardColor(card) {
+  if (card.type === "number") return CARD_COLORS.number[card.value] || "#888";
+  return CARD_COLORS[card.type] || "#888";
+}
+
+function renderCard(card) {
+  const el = document.createElement("div");
+  el.className = "playing-card " + (card.type === "bonus" ? "bonus" : card.type === "multiplier" ? "multiplier" : card.type !== "number" ? "action" : "");
+  el.style.background = cardColor(card);
+  el.textContent = card.label || String(card.value);
+  if (card.type === "number") el.style.color = card.value <= 2 ? "#333" : "#fff";
+  return el;
+}
+
+function onGameState(state) {
+  gameState = state;
+  if (!state) return;
+
+  document.getElementById("game-round").textContent = `Round ${state.round}`;
+  document.getElementById("game-target").textContent = `Target: ${state.targetScore}`;
+  document.getElementById("deck-info").textContent = `Cards in deck: ${state.deckCount}`;
+
+  const me = getUsername();
+  const turnPlayer = state.players[state.turnIndex];
+  document.getElementById("game-turn").textContent = state.phase === "playing" && turnPlayer
+    ? `${turnPlayer.username.toUpperCase()}'s turn` : "";
+
+  const sb = document.getElementById("scoreboard");
+  sb.innerHTML = "";
+  state.players.forEach(p => {
+    const chip = document.createElement("div");
+    chip.className = "score-chip" + (p.username === me ? " me" : "") + (turnPlayer?.username === p.username && state.phase === "playing" ? " turn" : "");
+    chip.textContent = `${p.username.toUpperCase()}: ${p.totalScore}${p.roundScore ? ` (+${p.roundScore})` : ""}`;
+    sb.appendChild(chip);
+  });
+
+  const table = document.getElementById("table-area");
+  table.innerHTML = "";
+  state.players.forEach(p => {
+    const row = document.createElement("div");
+    row.className = "player-row " + p.status + (p.username === me ? " me" : "");
+    const hdr = document.createElement("div");
+    hdr.className = "player-hdr";
+    hdr.innerHTML = `<span class="player-name">${p.username}${p.flip7ThisRound ? " ★ FLIP 7" : ""}</span><span class="player-status">${p.status}${p.hasSecondChance ? " · 2nd chance" : ""}</span>`;
+    row.appendChild(hdr);
+    const cards = document.createElement("div");
+    cards.className = "card-row";
+    p.cards.forEach(c => cards.appendChild(renderCard(c)));
+    row.appendChild(cards);
+    table.appendChild(row);
+  });
+
+  const prompt = document.getElementById("action-prompt");
+  const hitBtn = document.getElementById("hit-btn");
+  const stayBtn = document.getElementById("stay-btn");
+  const nextBtn = document.getElementById("next-round-btn");
+
+  hitBtn.style.display = stayBtn.style.display = "inline-block";
+  nextBtn.style.display = "none";
+  prompt.style.display = "none";
+
+  if (state.phase === "round_end") {
+    hitBtn.disabled = stayBtn.disabled = true;
+    if (mpRole === "host" && !state.winner) {
+      nextBtn.style.display = "inline-block";
+      hitBtn.style.display = stayBtn.style.display = "none";
+    }
+  } else if (state.phase === "game_over") {
+    hitBtn.disabled = stayBtn.disabled = true;
+  } else if (state.mustResolveAction && state.pendingAction) {
+    hitBtn.disabled = stayBtn.disabled = true;
+    prompt.style.display = "block";
+    document.getElementById("action-prompt-text").textContent =
+      `Play ${state.pendingAction.type === "freeze" ? "FREEZE" : "FLIP THREE"} — choose a target:`;
+    const tb = document.getElementById("target-btns");
+    tb.innerHTML = "";
+    (state.legalTargets || []).forEach(t => {
+      const b = document.createElement("button");
+      b.className = "btn";
+      b.textContent = t.toUpperCase();
+      b.addEventListener("click", () => gameAction("play_action", t));
+      tb.appendChild(b);
+    });
+  } else {
+    const canAct = state.isMyTurn && state.phase === "playing";
+    hitBtn.disabled = !canAct;
+    stayBtn.disabled = !canAct;
+  }
+}
+
+async function gameAction(action, targetUsername) {
+  const body = { action, room_id: mpRoomId, username: getUsername() };
+  if (targetUsername) body.target_username = targetUsername;
+  try {
+    const r = await fetch(GAME_URL, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body)
+    });
+    const d = await r.json();
+    if (!r.ok) { showToast(d.error || "Action failed"); return; }
+    onGameState(d.state);
+  } catch (_) { showToast("Network error"); }
+}
+
+document.getElementById("hit-btn").addEventListener("click", () => gameAction("hit"));
+document.getElementById("stay-btn").addEventListener("click", () => gameAction("stay"));
+document.getElementById("next-round-btn").addEventListener("click", () => gameAction("next_round"));
+
+function showRoundResult(state) {
+  const lines = state.players.map(p => `${p.username.toUpperCase()}: +${p.roundScore} → ${p.totalScore}`).join("\n");
+  document.getElementById("result-title").textContent = state.roundEndReason === "flip7" ? "FLIP 7!" : "Round Over";
+  document.getElementById("result-body").textContent = lines;
+  document.getElementById("result-modal").classList.add("open");
+}
+
+function showGameOver(state, winner) {
+  const me = getUsername();
+  const iWon = winner === me;
+  document.getElementById("result-title").textContent = iWon ? "YOU WIN!" : `${(winner || "").toUpperCase()} WINS!`;
+  document.getElementById("result-body").textContent = state.players
+    .map(p => `${p.username.toUpperCase()}: ${p.totalScore}`)
+    .join("\n");
+  document.getElementById("result-modal").classList.add("open");
+  if (!gameSynced) {
+    gameSynced = true;
+    syncGameResult(state, winner);
+  }
+}
+
+async function syncGameResult(state, winner) {
+  const me = getUsername();
+  const myPlayer = state.players.find(p => p.username === me);
+  if (!myPlayer) return;
+  const clientId = `${mpRoomId}-${Date.now()}-${me}`;
+  try {
+    await fetch(SYNC_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        games: [{
+          client_game_id: clientId,
+          room_id: mpRoomId,
+          username: me,
+          start_time: new Date(Date.now() - state.round * 60000).toISOString(),
+          end_time: new Date().toISOString(),
+          outcome: winner === me ? "win" : "loss",
+          final_score: myPlayer.totalScore,
+          rounds_played: state.round,
+          players_json: state.players.map(p => ({ username: p.username, score: p.totalScore, placement: p.username === winner ? 1 : 2 }))
+        }]
+      })
+    });
+  } catch (_) {}
+}
+
+document.getElementById("result-close").addEventListener("click", () => {
+  document.getElementById("result-modal").classList.remove("open");
+  if (gameState?.phase === "game_over") {
+    mpRoomId = null; mpRole = null; gameState = null; gameSynced = false;
+    showView("home");
+  }
+});
+
+// ── Stats ────────────────────────────────────────────────────────────────────
+async function loadStats() {
+  const u = getUsername();
+  if (!u) { openUserModal(); return; }
+  try {
+    const r = await fetch(`${STATS_URL}?username=${encodeURIComponent(u)}`);
+    const d = await r.json();
+    renderStatGrid("stat-me", [
+      ["Games", d.me.totalGames], ["Win %", d.me.winPct + "%"], ["Streak", d.me.currentStreak],
+      ["Best Streak", d.me.bestStreak], ["Avg Score", d.me.avgFinalScore], ["Bust Rate", d.me.bustRatePct + "%"]
+    ]);
+    renderStatGrid("stat-overall", [
+      ["All Games", d.overall.totalGames], ["Win %", d.overall.winPct + "%"],
+      ["Avg Score", d.overall.avgFinalScore], ["Best Score", d.overall.bestScore]
+    ]);
+    renderStatGrid("stat-mp", [
+      ["MP Games", d.mpStats.matches], ["MP Win %", d.mpStats.winPct + "%"],
+      ["MP Wins", d.mpStats.wins], ["MP Losses", d.mpStats.losses]
+    ]);
+    const h2h = document.getElementById("stat-h2h");
+    h2h.innerHTML = "<div class='stat-section-title'>HEAD TO HEAD</div>";
+    if (!d.mpStats.headToHead?.length) {
+      h2h.innerHTML += "<p class='mp-hint'>Play 3+ games vs same opponents</p>";
+    } else {
+      d.mpStats.headToHead.forEach(h => {
+        const row = document.createElement("div");
+        row.className = "h2h-row";
+        row.innerHTML = `<span>vs ${h.opponents.map(o => o.toUpperCase()).join(", ")}</span><span>${h.wins}W-${h.losses}L (${h.winPct}%)</span>`;
+        h2h.appendChild(row);
+      });
+    }
+  } catch (_) { showToast("Could not load stats"); }
+}
+
+function renderStatGrid(id, items) {
+  const el = document.getElementById(id);
+  el.innerHTML = "";
+  items.forEach(([lbl, val]) => {
+    el.innerHTML += `<div class="stat-box"><div class="stat-val">${val}</div><div class="stat-lbl">${lbl}</div></div>`;
+  });
+}
+
+document.getElementById("stats-btn").addEventListener("click", () => { showView("stats"); loadStats(); });
+document.getElementById("stats-back").addEventListener("click", () => showView("home"));
+
+// ── Init ─────────────────────────────────────────────────────────────────────
+updateHomeUser();
+showView("home");
+if (getUsername()) {
+  mpLoadAbly().then(() => { mpSubscribeLobby(); mpStartBgHeartbeat(); }).catch(() => {});
+}
+
+// Reconnect: if URL has room param, fetch state
+(async () => {
+  const params = new URLSearchParams(location.search);
+  const roomId = params.get("room");
+  if (roomId && getUsername()) {
+    mpRoomId = roomId;
+    await mpLoadAbly();
+    mpSubscribeRoom(roomId);
+    try {
+      const r = await fetch(`${GAME_URL}?room_id=${roomId}&username=${encodeURIComponent(getUsername())}`);
+      const d = await r.json();
+      if (d.state) { onGameState(d.state); showView("game"); }
+    } catch (_) {}
+  }
+})();
+</script>
+</body>
+</html>
