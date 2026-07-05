@@ -73,8 +73,43 @@ export default async function handler(req, res) {
     }
 
     if (req.method === "GET") {
-      const { room_id } = req.query;
-      if (!room_id) return res.status(400).json({ error: "room_id required" });
+      const { room_id, username } = req.query;
+
+      // Lookup active or waiting room for a user (reconnect after refresh).
+      if (username && !room_id) {
+        const u = String(username).toLowerCase();
+        const { rows } = await client.query(
+          `SELECT fr.id, fr.host_username, fr.status, fr.target_score, fr.created_at,
+                  fp.role, fp.status AS player_status
+           FROM flip_room_players fp
+           JOIN flip_rooms fr ON fr.id = fp.room_id
+           WHERE fp.username = $1 AND fr.status IN ('lobby', 'active')
+           ORDER BY fr.created_at DESC
+           LIMIT 1`,
+          [u]
+        );
+        if (!rows.length) {
+          return res.status(200).json({ room_id: null });
+        }
+        const row = rows[0];
+        const { players } = await getRoomWithPlayers(client, row.id);
+        return res.status(200).json({
+          room_id: row.id,
+          role: row.role,
+          player_status: row.player_status,
+          room: {
+            id: row.id,
+            host_username: row.host_username,
+            status: row.status,
+            target_score: row.target_score,
+          },
+          players,
+        });
+      }
+
+      if (!room_id) {
+        return res.status(400).json({ error: "room_id or username required" });
+      }
       const { room, players } = await getRoomWithPlayers(client, room_id);
       if (!room) return res.status(404).json({ error: "room not found" });
       return res.status(200).json({ room, players });
@@ -112,8 +147,13 @@ export default async function handler(req, res) {
           `UPDATE flip_rooms SET status='abandoned', ended_at=NOW() WHERE id=$1`,
           [room_id]
         );
-        await ablyPublish(roomChannel(room_id), "room-abandoned", { room_id });
-        await ablyPublish(LOBBY_CHANNEL, "room-abandoned", { room_id });
+        await client.query(
+          `UPDATE flip_room_players SET status='left' WHERE room_id=$1 AND status='playing'`,
+          [room_id]
+        );
+        const payload = { room_id, abandoned_by: user };
+        await ablyPublish(roomChannel(room_id), "room-abandoned", payload);
+        await ablyPublish(LOBBY_CHANNEL, "room-abandoned", payload);
         return res.status(200).json({ ok: true });
       }
 

@@ -21,6 +21,7 @@
     <p class="home-sub">Collect 7 unique numbers to Flip 7. First to 200 points wins. Play with 3–6 friends online.</p>
     <div class="user-badge" id="home-user">Set your name to play</div>
     <button class="btn btn-primary" id="find-game-btn">FIND GAME</button>
+    <button class="btn btn-accent" id="return-game-btn" style="display:none">RETURN TO GAME</button>
   </div>
 
   <div id="view-game">
@@ -28,6 +29,7 @@
       <span id="game-round">Round 1</span>
       <span id="game-turn"></span>
       <span id="game-target">Target: 200</span>
+      <button class="btn leave-btn" id="leave-game-btn" type="button">LEAVE GAME</button>
     </div>
     <div class="scoreboard" id="scoreboard"></div>
     <div class="table-area" id="table-area"></div>
@@ -80,6 +82,13 @@
         <button class="modal-x" id="mp-close">✕</button>
       </div>
       <div class="modal-body">
+        <div id="mp-active-game-banner" class="mp-inv-banner" style="display:none">
+          <div class="mp-inv-text" id="mp-active-game-text">You have a game in progress.</div>
+          <div class="mp-inv-row">
+            <button class="mp-acc-btn" id="mp-return-btn" type="button">RETURN TO GAME</button>
+            <button class="mp-dec-btn" id="mp-leave-active-btn" type="button">LEAVE GAME</button>
+          </div>
+        </div>
         <div id="mp-inv-area"></div>
         <div class="mp-hint" id="mp-lobby-status">Looking for players...</div>
         <div class="mp-sec" id="mp-sec-online" style="display:none">ONLINE NOW</div>
@@ -210,6 +219,150 @@ function updateHomeUser() {
   document.getElementById("home-user").textContent = u ? u.toUpperCase() : "Set your name to play";
 }
 
+function persistActiveRoom(roomId, role) {
+  if (roomId) {
+    localStorage.setItem("flip_room_id", roomId);
+    if (role) localStorage.setItem("flip_room_role", role);
+  }
+}
+
+function clearActiveRoom() {
+  localStorage.removeItem("flip_room_id");
+  localStorage.removeItem("flip_room_role");
+  mpRoomId = null;
+  mpRole = null;
+  document.getElementById("return-game-btn").style.display = "none";
+  const banner = document.getElementById("mp-active-game-banner");
+  if (banner) banner.style.display = "none";
+}
+
+async function fetchActiveRoom() {
+  const u = getUsername();
+  if (!u) return null;
+  try {
+    const r = await fetch(`${ROOM_URL}?username=${encodeURIComponent(u)}`);
+    const d = await r.json();
+    if (!d.room_id) return null;
+    if (d.room.status === "complete" || d.room.status === "abandoned") {
+      clearActiveRoom();
+      return null;
+    }
+    return d;
+  } catch (_) {
+    return null;
+  }
+}
+
+function updateReturnGameUI(hasActive) {
+  document.getElementById("return-game-btn").style.display = hasActive ? "inline-block" : "none";
+}
+
+async function refreshActiveGameUI() {
+  const data = await fetchActiveRoom();
+  updateReturnGameUI(!!data?.room_id);
+  const banner = document.getElementById("mp-active-game-banner");
+  if (data?.room_id && document.getElementById("mp-modal").classList.contains("open")) {
+    banner.style.display = "block";
+    const st = data.room.status === "active" ? "in progress" : "waiting to start";
+    document.getElementById("mp-active-game-text").textContent =
+      `You have a game ${st}. Others see you as "In game".`;
+    document.getElementById("mp-invite-btn").disabled = true;
+    document.getElementById("mp-sec-online").style.display = "none";
+    document.getElementById("mp-lobby-list").innerHTML = "";
+    document.getElementById("mp-lobby-status").style.display = "block";
+    document.getElementById("mp-lobby-status").textContent =
+      "Finish or leave your current game before starting a new one.";
+  } else if (banner) {
+    banner.style.display = "none";
+  }
+  return data;
+}
+
+function handleRoomAbandoned(abandonedBy) {
+  clearActiveRoom();
+  gameState = null;
+  gameSynced = false;
+  mpPendingInvites = [];
+  if (mpRoomChannel) {
+    mpRoomChannel.unsubscribe();
+    mpRoomChannel = null;
+  }
+  showView("home");
+  document.getElementById("mp-modal").classList.remove("open");
+  document.getElementById("result-modal").classList.remove("open");
+  const me = getUsername();
+  if (abandonedBy && abandonedBy === me) {
+    showToast("You left the game");
+  } else {
+    showToast(`${(abandonedBy || "Someone").toUpperCase()} left — game ended`);
+  }
+}
+
+async function returnToActiveGame(data) {
+  data = data || await fetchActiveRoom();
+  if (!data?.room_id) {
+    showToast("No active game found");
+    updateReturnGameUI(false);
+    return false;
+  }
+  await mpLoadAbly();
+  mpRoomId = data.room_id;
+  mpRole = data.role || localStorage.getItem("flip_room_role") || "player";
+  persistActiveRoom(mpRoomId, mpRole);
+  mpSubscribeRoom(mpRoomId);
+  document.getElementById("mp-modal").classList.remove("open");
+
+  if (data.room.status === "active") {
+    try {
+      const r = await fetch(
+        `${GAME_URL}?room_id=${mpRoomId}&username=${encodeURIComponent(getUsername())}`
+      );
+      const gd = await r.json();
+      if (gd.state) {
+        onGameState(gd.state);
+        showView("game");
+        return true;
+      }
+    } catch (_) {}
+    showToast("Could not load game state");
+    return false;
+  }
+
+  if (data.room.status === "lobby") {
+    const host = data.room.host_username;
+    const me = getUsername();
+    document.getElementById("mp-modal").classList.add("open");
+    if (me === host) {
+      mpRenderWaitList(data.players || []);
+      mpShowMpView("waiting");
+    } else {
+      document.getElementById("mp-accepted-msg").textContent =
+        `Waiting for ${host.toUpperCase()} to start the game…`;
+      mpShowMpView("accepted");
+    }
+    showView("home");
+    return true;
+  }
+  return false;
+}
+
+async function mpLeaveGame() {
+  if (!mpRoomId) {
+    const data = await fetchActiveRoom();
+    if (data?.room_id) mpRoomId = data.room_id;
+  }
+  if (!mpRoomId) return;
+  if (!confirm("Leave this game? It will end for all players.")) return;
+  try {
+    await fetch(ROOM_URL, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "abandon", room_id: mpRoomId, username: getUsername() })
+    });
+  } catch (_) {}
+  handleRoomAbandoned(getUsername());
+}
+
 // ── User ─────────────────────────────────────────────────────────────────────
 function openUserModal() {
   document.getElementById("user-input").value = getUsername();
@@ -239,7 +392,15 @@ function saveUsername() {
   localStorage.setItem("flip_username", raw.toLowerCase());
   document.getElementById("user-modal").classList.remove("open");
   updateHomeUser();
-  mpLoadAbly().then(() => { mpSubscribeLobby(); mpStartBgHeartbeat(); }).catch(() => {});
+  mpLoadAbly().then(async () => {
+    mpSubscribeLobby();
+    mpStartBgHeartbeat();
+    const data = await fetchActiveRoom();
+    if (data?.room_id) {
+      updateReturnGameUI(true);
+      await returnToActiveGame(data);
+    }
+  }).catch(() => {});
 }
 
 document.getElementById("user-btn").addEventListener("click", openUserModal);
@@ -278,9 +439,11 @@ function mpSubscribeLobby() {
     else mpRenderInvitations();
   });
   mpLobbyChannel.subscribe("room-abandoned", msg => {
-    const d = JSON.parse(msg.data);
+    const d = JSON.parse(msg.data || "{}");
+    if (mpRoomId === d.room_id || !d.room_id) {
+      handleRoomAbandoned(d.abandoned_by);
+    }
     mpPendingInvites = mpPendingInvites.filter(i => i.room_id !== d.room_id);
-    if (mpRoomId === d.room_id) { mpRoomId = null; mpRole = null; showView("home"); }
     mpRenderInvitations();
   });
 }
@@ -297,6 +460,7 @@ function mpSubscribeRoom(roomId) {
   mpRoomChannel.subscribe("game-start", msg => {
     const d = JSON.parse(msg.data);
     onGameState(d.state);
+    persistActiveRoom(mpRoomId, mpRole);
     document.getElementById("mp-modal").classList.remove("open");
     showView("game");
   });
@@ -314,10 +478,9 @@ function mpSubscribeRoom(roomId) {
     onGameState(d.state);
     showGameOver(d.state, d.winner);
   });
-  mpRoomChannel.subscribe("room-abandoned", () => {
-    mpRoomId = null; mpRole = null; gameState = null;
-    showView("home");
-    showToast("Room was abandoned");
+  mpRoomChannel.subscribe("room-abandoned", msg => {
+    const d = JSON.parse(msg.data || "{}");
+    handleRoomAbandoned(d.abandoned_by);
   });
 }
 
@@ -359,6 +522,13 @@ function mpShowMpView(v) {
 async function openMpModal() {
   await mpLoadAbly();
   if (!getUsername()) { openUserModal(); return; }
+  const active = await refreshActiveGameUI();
+  if (active?.room_id) {
+    mpShowMpView("lobby");
+    document.getElementById("mp-modal").classList.add("open");
+    mpSubscribeLobby();
+    return;
+  }
   mpSelectedPlayers.clear();
   mpShowMpView("lobby");
   document.getElementById("mp-modal").classList.add("open");
@@ -432,6 +602,7 @@ async function mpAcceptInvite(inv) {
   mpRenderInvitations();
   mpRoomId = inv.room_id;
   mpRole = "player";
+  persistActiveRoom(mpRoomId, mpRole);
   mpSubscribeRoom(inv.room_id);
   document.getElementById("mp-accepted-msg").textContent = `Waiting for ${inv.host.toUpperCase()} to start...`;
   mpShowMpView("accepted");
@@ -467,6 +638,7 @@ async function mpInvitePlayers() {
   if (!r.ok) { showToast(d.error || "Could not create room"); return; }
   mpRoomId = d.room_id;
   mpRole = "host";
+  persistActiveRoom(mpRoomId, mpRole);
   mpSubscribeRoom(mpRoomId);
   mpRenderWaitList([
     { username: getUsername(), role: "host", status: "accepted" },
@@ -507,24 +679,23 @@ async function mpStartGame() {
   const d = await r.json();
   if (!r.ok) { showToast(d.error || "Could not start"); return; }
   onGameState(d.state);
+  persistActiveRoom(mpRoomId, mpRole);
   document.getElementById("mp-modal").classList.remove("open");
   showView("game");
 }
 
 async function mpCancelRoom() {
-  if (mpRoomId) {
-    await fetch(ROOM_URL, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "abandon", room_id: mpRoomId, username: getUsername() })
-    });
-    mpRoomId = null; mpRole = null;
-  }
+  if (!confirm("Cancel this game? It will end for all players.")) return;
+  await mpLeaveGame();
   mpShowMpView("lobby");
   await mpLoadLobbyPlayers();
 }
 
 document.getElementById("find-game-btn").addEventListener("click", openMpModal);
+document.getElementById("return-game-btn").addEventListener("click", () => returnToActiveGame());
+document.getElementById("leave-game-btn").addEventListener("click", mpLeaveGame);
+document.getElementById("mp-return-btn").addEventListener("click", () => returnToActiveGame());
+document.getElementById("mp-leave-active-btn").addEventListener("click", mpLeaveGame);
 document.getElementById("mp-close").addEventListener("click", closeMpModal);
 document.getElementById("mp-invite-btn").addEventListener("click", mpInvitePlayers);
 document.getElementById("mp-start-btn").addEventListener("click", mpStartGame);
@@ -711,7 +882,9 @@ async function syncGameResult(state, winner) {
 document.getElementById("result-close").addEventListener("click", () => {
   document.getElementById("result-modal").classList.remove("open");
   if (gameState?.phase === "game_over") {
-    mpRoomId = null; mpRole = null; gameState = null; gameSynced = false;
+    clearActiveRoom();
+    gameState = null;
+    gameSynced = false;
     showView("home");
   }
 });
@@ -764,25 +937,44 @@ document.getElementById("stats-back").addEventListener("click", () => showView("
 // ── Init ─────────────────────────────────────────────────────────────────────
 updateHomeUser();
 showView("home");
-if (!getUsername()) {
-  openUserModal();
-} else {
-  mpLoadAbly().then(() => { mpSubscribeLobby(); mpStartBgHeartbeat(); }).catch(() => {});
-}
 
-// Reconnect: if URL has room param, fetch state
-(async () => {
+(async function initApp() {
   const params = new URLSearchParams(location.search);
-  const roomId = params.get("room");
-  if (roomId && getUsername()) {
-    mpRoomId = roomId;
+  const roomFromUrl = params.get("room");
+
+  if (!getUsername()) {
+    openUserModal();
+    return;
+  }
+
+  try {
     await mpLoadAbly();
-    mpSubscribeRoom(roomId);
+    mpSubscribeLobby();
+    mpStartBgHeartbeat();
+  } catch (_) {}
+
+  if (roomFromUrl) {
+    mpRoomId = roomFromUrl;
+    mpRole = localStorage.getItem("flip_room_role") || "player";
+    persistActiveRoom(mpRoomId, mpRole);
+    mpSubscribeRoom(roomFromUrl);
     try {
-      const r = await fetch(`${GAME_URL}?room_id=${roomId}&username=${encodeURIComponent(getUsername())}`);
+      const r = await fetch(
+        `${GAME_URL}?room_id=${roomFromUrl}&username=${encodeURIComponent(getUsername())}`
+      );
       const d = await r.json();
-      if (d.state) { onGameState(d.state); showView("game"); }
+      if (d.state) {
+        onGameState(d.state);
+        showView("game");
+        return;
+      }
     } catch (_) {}
+  }
+
+  const data = await fetchActiveRoom();
+  if (data?.room_id) {
+    updateReturnGameUI(true);
+    await returnToActiveGame(data);
   }
 })();
 </script>

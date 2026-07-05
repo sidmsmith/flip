@@ -105,6 +105,19 @@ header {
   color: var(--muted);
 }
 
+.leave-btn {
+  margin-left: auto;
+  font-size: 0.75rem;
+  padding: 6px 12px;
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.leave-btn:hover {
+  background: var(--accent);
+  color: #fff;
+}
+
 .scoreboard {
   display: flex;
   flex-wrap: wrap;
