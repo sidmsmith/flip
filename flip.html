@@ -84,7 +84,8 @@
         <div class="mp-hint" id="mp-lobby-status">Looking for players...</div>
         <div class="mp-sec" id="mp-sec-online" style="display:none">ONLINE NOW</div>
         <div id="mp-lobby-list"></div>
-        <button class="btn btn-primary" id="mp-invite-btn" style="width:100%;margin-top:12px" disabled>INVITE SELECTED</button>
+        <p class="mp-hint" id="mp-invite-hint">Select at least 2 players (3–6 total including you).</p>
+        <button class="btn btn-primary" id="mp-invite-btn" style="width:100%;margin-top:8px" disabled>INVITE SELECTED</button>
       </div>
     </div>
     <div id="mp-v-waiting" style="display:none">
@@ -148,8 +149,47 @@ let mpPendingInvites = [];
 let gameState = null;
 let gameSynced = false;
 
+const MIN_INVITEES = 2; // host + 2 = minimum 3 players for Flip 7
+
 function getUsername() {
   return (localStorage.getItem("flip_username") || "").trim().toLowerCase();
+}
+
+function updateInviteBtn() {
+  const n = mpSelectedPlayers.size;
+  const btn = document.getElementById("mp-invite-btn");
+  btn.disabled = n < MIN_INVITEES;
+  btn.textContent = n >= MIN_INVITEES
+    ? `INVITE SELECTED (${n})`
+    : `INVITE SELECTED (${n}/${MIN_INVITEES} min)`;
+}
+
+/** Ably broadcasts omit per-user flags — compute locally. */
+function personalizeState(state) {
+  if (!state) return state;
+  const me = getUsername();
+  if (!me) return state;
+
+  const turnPlayer = state.players?.[state.turnIndex];
+  const pending = state.pendingAction;
+
+  state.mustResolveAction = !!(pending && pending.fromUsername === me);
+  state.isMyTurn =
+    state.phase === "playing" &&
+    !pending &&
+    (turnPlayer?.username === me ||
+      (state.forcedHitsRemaining > 0 && state.forcedHitTarget === me));
+
+  if (state.mustResolveAction && pending) {
+    state.legalTargets =
+      pending.canTarget ||
+      state.players
+        .filter((p) => p.status === "active" && p.username !== me)
+        .map((p) => p.username);
+  } else {
+    state.legalTargets = [];
+  }
+  return state;
 }
 
 function showToast(msg, ms = 2500) {
@@ -364,13 +404,13 @@ async function mpLoadLobbyPlayers() {
               mpSelectedPlayers.add(p);
             }
             row.classList.toggle("sel", mpSelectedPlayers.has(p));
-            document.getElementById("mp-invite-btn").disabled = mpSelectedPlayers.size === 0;
+            updateInviteBtn();
           });
         }
         listEl.appendChild(row);
       });
     }
-    document.getElementById("mp-invite-btn").disabled = mpSelectedPlayers.size === 0;
+    updateInviteBtn();
   } catch (_) {}
 }
 
@@ -413,6 +453,10 @@ async function mpDeclineInvite(inv, idx) {
 }
 
 async function mpInvitePlayers() {
+  if (mpSelectedPlayers.size < MIN_INVITEES) {
+    showToast(`Select at least ${MIN_INVITEES} players`);
+    return;
+  }
   const invitees = [...mpSelectedPlayers];
   const r = await fetch(ROOM_URL, {
     method: "POST",
@@ -502,6 +546,7 @@ function renderCard(card) {
 }
 
 function onGameState(state) {
+  state = personalizeState(state);
   gameState = state;
   if (!state) return;
 
@@ -535,6 +580,20 @@ function onGameState(state) {
     const cards = document.createElement("div");
     cards.className = "card-row";
     p.cards.forEach(c => cards.appendChild(renderCard(c)));
+    if (p.hasSecondChance) {
+      const sc = document.createElement("div");
+      sc.className = "playing-card action";
+      sc.style.background = CARD_COLORS.second_chance;
+      sc.textContent = "2nd CHANCE";
+      sc.title = "Held — discards on duplicate number";
+      cards.appendChild(sc);
+    }
+    if (!p.cards.length && !p.hasSecondChance && p.status === "active") {
+      const empty = document.createElement("span");
+      empty.className = "mp-hint";
+      empty.textContent = "No cards yet";
+      cards.appendChild(empty);
+    }
     row.appendChild(cards);
     table.appendChild(row);
   });
@@ -559,8 +618,9 @@ function onGameState(state) {
   } else if (state.mustResolveAction && state.pendingAction) {
     hitBtn.disabled = stayBtn.disabled = true;
     prompt.style.display = "block";
+    const actionLabel = state.pendingAction.type === "freeze" ? "FREEZE" : "FLIP THREE";
     document.getElementById("action-prompt-text").textContent =
-      `Play ${state.pendingAction.type === "freeze" ? "FREEZE" : "FLIP THREE"} — choose a target:`;
+      `You drew ${actionLabel} — choose a target:`;
     const tb = document.getElementById("target-btns");
     tb.innerHTML = "";
     (state.legalTargets || []).forEach(t => {
@@ -570,6 +630,11 @@ function onGameState(state) {
       b.addEventListener("click", () => gameAction("play_action", t));
       tb.appendChild(b);
     });
+  } else if (state.pendingAction && !state.mustResolveAction) {
+    hitBtn.disabled = stayBtn.disabled = true;
+    const who = state.pendingAction.fromUsername?.toUpperCase() || "?";
+    document.getElementById("game-turn").textContent =
+      `Waiting for ${who} to play ${state.pendingAction.type === "freeze" ? "FREEZE" : "FLIP THREE"}…`;
   } else {
     const canAct = state.isMyTurn && state.phase === "playing";
     hitBtn.disabled = !canAct;
@@ -699,7 +764,9 @@ document.getElementById("stats-back").addEventListener("click", () => showView("
 // ── Init ─────────────────────────────────────────────────────────────────────
 updateHomeUser();
 showView("home");
-if (getUsername()) {
+if (!getUsername()) {
+  openUserModal();
+} else {
   mpLoadAbly().then(() => { mpSubscribeLobby(); mpStartBgHeartbeat(); }).catch(() => {});
 }
 
