@@ -923,6 +923,11 @@ function onGameState(state) {
   gameState = state;
   if (!state) return;
 
+  if (!state.mustResolveCard || state.pendingResolution?.type !== "swap") {
+    swapPickStep = 0;
+    swapPickFirst = null;
+  }
+
   document.getElementById("game-round").textContent =
     `Round ${state.round}` + (state.gameMode === "vengeance" ? " · Vengeance" + (state.brutalMode ? " Brutal" : "") : "");
   document.getElementById("game-target").textContent = `Target: ${state.targetScore}`;
@@ -1046,6 +1051,7 @@ function onGameState(state) {
       document.getElementById("action-prompt-text").textContent =
         pr.type === "steal" ? "STEAL — pick a card:" : "DISCARD — pick a card to remove:";
       (state.swappableCards || []).forEach(({ username, card }) => {
+        if (pr.type === "steal" && username === me) return;
         const b = document.createElement("button");
         b.className = "btn";
         b.textContent = `${username.toUpperCase()}: ${card.label}`;
@@ -1054,9 +1060,10 @@ function onGameState(state) {
       });
     } else if (pr.type === "swap") {
       document.getElementById("action-prompt-text").textContent = swapPickStep === 0
-        ? "SWAP — pick first card:" : "SWAP — pick second card:";
+        ? "SWAP — pick first card:"
+        : `SWAP — pick a card from another player (not ${swapPickFirst.username.toUpperCase()}):`;
       (state.swappableCards || []).forEach(({ username, card }) => {
-        if (swapPickStep === 1 && swapPickFirst?.card.id === card.id && swapPickFirst?.username === username) return;
+        if (swapPickStep === 1 && swapPickFirst?.username === username) return;
         const b = document.createElement("button");
         b.className = "btn";
         b.textContent = `${username.toUpperCase()}: ${card.label}`;
