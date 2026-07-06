@@ -1060,17 +1060,29 @@ function onGameState(state) {
         tb.appendChild(b);
       });
     } else if (pr.type === "swap") {
-      document.getElementById("action-prompt-text").textContent = swapPickStep === 0
-        ? "SWAP — pick first card:"
-        : `SWAP — pick a card from another player (not ${swapPickFirst.username.toUpperCase()}):`;
-      (state.swappableCards || []).forEach(({ username, card }) => {
-        if (swapPickStep === 1 && swapPickFirst?.username === username) return;
-        const b = document.createElement("button");
-        b.className = "btn";
-        b.textContent = `${username.toUpperCase()}: ${card.label}`;
-        b.addEventListener("click", () => onSwapCardPick(username, card.id));
-        tb.appendChild(b);
-      });
+      const all = state.swappableCards || [];
+      const picks = swapPickStep === 0
+        ? all.filter(({ username }) => swapHasSecondPickClient(state, username))
+        : all.filter(({ username }) => username !== swapPickFirst?.username);
+      if (picks.length === 0) {
+        document.getElementById("action-prompt-text").textContent =
+          swapPickStep === 0
+            ? "SWAP can't be completed — need cards on two different players. Discarding…"
+            : "SWAP can't be completed — no card on another player. Discarding…";
+        tb.innerHTML = "";
+        cancelSwapResolution();
+      } else {
+        document.getElementById("action-prompt-text").textContent = swapPickStep === 0
+          ? "SWAP — pick first card:"
+          : `SWAP — pick a card from another player (not ${swapPickFirst.username.toUpperCase()}):`;
+        picks.forEach(({ username, card }) => {
+          const b = document.createElement("button");
+          b.className = "btn";
+          b.textContent = `${username.toUpperCase()}: ${card.label}`;
+          b.addEventListener("click", () => onSwapCardPick(username, card.id));
+          tb.appendChild(b);
+        });
+      }
     }
   } else if (state.mustResolveAction && state.pendingChoice) {
     hitBtn.disabled = stayBtn.disabled = true;
@@ -1139,6 +1151,21 @@ function onGameState(state) {
 
 let swapPickStep = 0;
 let swapPickFirst = null;
+let swapCancelInFlight = false;
+
+function swapHasSecondPickClient(state, firstOwnerUsername) {
+  const owner = firstOwnerUsername.toLowerCase();
+  return (state.swappableCards || []).some((c) => c.username !== owner);
+}
+
+async function cancelSwapResolution() {
+  if (swapCancelInFlight) return;
+  swapCancelInFlight = true;
+  swapPickStep = 0;
+  swapPickFirst = null;
+  await gameAction("resolve_card", null, { cancel: true });
+  swapCancelInFlight = false;
+}
 
 function onSwapCardPick(owner, cardId) {
   if (swapPickStep === 0) {
@@ -1165,6 +1192,7 @@ async function gameAction(action, targetUsername, extra = {}) {
   if (extra.card_id2) body.card_id2 = extra.card_id2;
   if (extra.owner_username) body.owner_username = extra.owner_username;
   if (extra.owner_username2) body.owner_username2 = extra.owner_username2;
+  if (extra.cancel) body.cancel = true;
   try {
     const r = await fetch(GAME_URL, {
       method: "PATCH",

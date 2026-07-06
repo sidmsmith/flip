@@ -169,6 +169,7 @@ export default async function handler(req, res) {
             cardId2: card_id2,
             ownerUsername: owner_username,
             ownerUsername2: owner_username2,
+            cancel: !!req.body.cancel,
           });
         } else if (action === "brutal_flip7") {
           gameState = applyAction(gameState, "brutal_flip7", user, {
