@@ -25,6 +25,7 @@
   </div>
 
   <div id="view-game">
+    <div class="game-scroll">
     <div class="game-meta">
       <span id="game-round">Round 1</span>
       <span id="game-turn"></span>
@@ -37,6 +38,7 @@
     <div class="action-prompt" id="action-prompt" style="display:none">
       <p id="action-prompt-text"></p>
       <div class="target-btns" id="target-btns"></div>
+    </div>
     </div>
     <div class="action-bar" id="action-bar">
       <button class="btn btn-stay disabled" id="stay-btn" disabled>STAY</button>
@@ -248,6 +250,12 @@ function personalizeState(state) {
     (turnPlayer?.username === me ||
       (state.forcedHitsRemaining > 0 && state.forcedHitTarget === me));
 
+  state.mustForcedHit =
+    me &&
+    state.phase === "playing" &&
+    state.forcedHitsRemaining > 0 &&
+    state.forcedHitTarget === me;
+
   if (state.mustResolveAction && pending) {
     state.legalTargets =
       pending.canTarget ||
@@ -312,6 +320,7 @@ function notifyGameEvents(state) {
 }
 
 function showView(name) {
+  document.body.classList.toggle("in-game-view", name === "game");
   document.getElementById("view-home").style.display = name === "home" ? "flex" : "none";
   document.getElementById("view-game").style.display = name === "game" ? "flex" : "none";
   document.getElementById("view-stats").style.display = name === "stats" ? "flex" : "none";
@@ -877,11 +886,12 @@ function displayRoundPoints(p, phase) {
   return p.tableauScore ?? 0;
 }
 
-function setActionButtonStyles(canAct) {
+function setActionButtonStyles(hitActive, stayActive) {
+  if (stayActive === undefined) stayActive = hitActive;
   const hitBtn = document.getElementById("hit-btn");
   const stayBtn = document.getElementById("stay-btn");
-  hitBtn.className = "btn btn-hit " + (canAct ? "active" : "disabled");
-  stayBtn.className = "btn btn-stay " + (canAct ? "active" : "disabled");
+  hitBtn.className = "btn btn-hit " + (hitActive ? "active" : "disabled");
+  stayBtn.className = "btn btn-stay " + (stayActive ? "active" : "disabled");
 }
 
 function renderCard(card, opts = {}) {
@@ -1093,10 +1103,18 @@ function onGameState(state) {
     document.getElementById("game-turn").textContent =
       `Waiting for ${who} to play ${state.pendingAction.type === "freeze" ? "FREEZE" : "FLIP THREE"}…`;
   } else {
-    const canAct = state.isMyTurn && state.phase === "playing";
-    hitBtn.disabled = !canAct;
-    stayBtn.disabled = !canAct;
-    setActionButtonStyles(canAct);
+    const mePlayer = state.players.find((p) => p.username === me);
+    const forcedHit = !!state.mustForcedHit;
+    const zeroMustHit = !!mePlayer?.hasZero && state.isMyTurn;
+    const canHit = state.isMyTurn && state.phase === "playing";
+    const canStay = canHit && !forcedHit && !zeroMustHit;
+    hitBtn.disabled = !canHit;
+    stayBtn.disabled = !canStay;
+    setActionButtonStyles(canHit, canStay);
+    if (forcedHit && state.forcedHitsRemaining) {
+      document.getElementById("game-turn").textContent =
+        `FLIP 3 — hit ${state.forcedHitsRemaining} more time${state.forcedHitsRemaining === 1 ? "" : "s"}`;
+    }
   }
 }
 

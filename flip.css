@@ -93,7 +93,25 @@ header {
 }
 
 /* Game table */
-#view-game { display: none; flex-direction: column; gap: 16px; flex: 1; }
+#view-game {
+  display: none;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  gap: 0;
+}
+
+.game-scroll {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding-bottom: 8px;
+  -webkit-overflow-scrolling: touch;
+}
 
 .game-meta {
   display: flex;
@@ -196,11 +214,25 @@ header {
 }
 
 .action-bar {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 60;
   display: flex;
   gap: 12px;
   justify-content: center;
-  padding: 16px 0;
-  flex-wrap: wrap;
+  padding: 12px 16px;
+  padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+  flex-wrap: nowrap;
+  background: linear-gradient(to top, var(--bg) 70%, transparent);
+  border-top: 1px solid var(--card-border);
+  max-width: 900px;
+  margin: 0 auto;
+}
+
+body.in-game-view #app {
+  padding-bottom: calc(80px + env(safe-area-inset-bottom, 0px));
 }
 
 .action-bar .btn { min-width: 120px; padding: 14px 24px; font-size: 1rem; }
@@ -411,17 +443,25 @@ header {
 
 .toast {
   position: fixed;
-  bottom: 24px;
+  top: 50%;
   left: 50%;
-  transform: translateX(-50%);
+  right: auto;
+  bottom: auto;
+  transform: translate(-50%, -50%);
   background: var(--surface2);
-  padding: 10px 20px;
-  border-radius: 8px;
-  font-size: 0.85rem;
-  z-index: 200;
+  padding: 16px 24px;
+  border-radius: 12px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  text-align: center;
+  z-index: 300;
   opacity: 0;
   transition: opacity 0.3s;
   pointer-events: none;
+  max-width: min(90vw, 360px);
+  line-height: 1.4;
+  border: 1px solid var(--accent2);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.55);
 }
 
 .toast.show { opacity: 1; }
