@@ -24,7 +24,8 @@ export default async function handler(req, res) {
     await ensureFlipTables(client);
 
     if (req.method === "POST") {
-      const { username, invitees = [] } = req.body || {};
+      const { username, invitees = [], game_mode = "classic", brutal_mode = false } =
+        req.body || {};
       if (!username) return res.status(400).json({ error: "username required" });
       if (!invitees.length) return res.status(400).json({ error: "invitees required" });
 
@@ -39,9 +40,12 @@ export default async function handler(req, res) {
         });
       }
 
+      const mode = game_mode === "vengeance" ? "vengeance" : "classic";
+      const brutal = mode === "vengeance" && !!brutal_mode;
+
       const { rows: [room] } = await client.query(
-        `INSERT INTO flip_rooms (host_username) VALUES ($1) RETURNING id`,
-        [host]
+        `INSERT INTO flip_rooms (host_username, game_mode, brutal_mode) VALUES ($1,$2,$3) RETURNING id`,
+        [host, mode, brutal]
       );
       const roomId = room.id;
 
@@ -69,7 +73,7 @@ export default async function handler(req, res) {
         });
       }
 
-      return res.status(200).json({ room_id: roomId });
+      return res.status(200).json({ room_id: roomId, game_mode: mode, brutal_mode: brutal });
     }
 
     if (req.method === "GET") {
@@ -79,7 +83,7 @@ export default async function handler(req, res) {
       if (username && !room_id) {
         const u = String(username).toLowerCase();
         const { rows } = await client.query(
-          `SELECT fr.id, fr.host_username, fr.status, fr.target_score, fr.created_at,
+          `SELECT fr.id, fr.host_username, fr.status, fr.target_score, fr.game_mode, fr.brutal_mode, fr.created_at,
                   fp.role, fp.status AS player_status
            FROM flip_room_players fp
            JOIN flip_rooms fr ON fr.id = fp.room_id
@@ -102,6 +106,8 @@ export default async function handler(req, res) {
             host_username: row.host_username,
             status: row.status,
             target_score: row.target_score,
+            game_mode: row.game_mode || "classic",
+            brutal_mode: !!row.brutal_mode,
           },
           players,
         });
@@ -112,7 +118,14 @@ export default async function handler(req, res) {
       }
       const { room, players } = await getRoomWithPlayers(client, room_id);
       if (!room) return res.status(404).json({ error: "room not found" });
-      return res.status(200).json({ room, players });
+      return res.status(200).json({
+        room: {
+          ...room,
+          game_mode: room.game_mode || "classic",
+          brutal_mode: !!room.brutal_mode,
+        },
+        players,
+      });
     }
 
     if (req.method === "PATCH") {

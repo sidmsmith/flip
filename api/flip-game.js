@@ -5,7 +5,7 @@ import {
   applyAction,
   publicState,
   MIN_PLAYERS,
-} from "../lib/flip-engine.js";
+} from "../lib/flip-game-router.js";
 
 async function loadRoom(client, roomId) {
   const { rows: [room] } = await client.query(
@@ -63,6 +63,8 @@ export default async function handler(req, res) {
           status: room.status,
           host_username: room.host_username,
           target_score: room.target_score,
+          game_mode: room.game_mode || "classic",
+          brutal_mode: !!room.brutal_mode,
         },
         players,
         state: view,
@@ -70,7 +72,8 @@ export default async function handler(req, res) {
     }
 
     if (req.method === "PATCH") {
-      const { action, room_id, username, target_username } = req.body || {};
+      const { action, room_id, username, target_username, card_id, card_id2, owner_username, owner_username2, brutal_choice } =
+        req.body || {};
       if (!action || !room_id || !username) {
         return res.status(400).json({ error: "action, room_id, and username required" });
       }
@@ -105,6 +108,8 @@ export default async function handler(req, res) {
 
         const gameState = createInitialState(usernames, {
           targetScore: room.target_score || 200,
+          gameMode: room.game_mode || "classic",
+          brutalMode: !!room.brutal_mode,
         });
 
         await client.query(
@@ -154,6 +159,19 @@ export default async function handler(req, res) {
             return res.status(400).json({ error: "target_username required" });
           }
           gameState = applyAction(gameState, "play_action", user, {
+            targetUsername: target_username,
+          });
+        } else if (action === "resolve_card") {
+          gameState = applyAction(gameState, "resolve_card", user, {
+            targetUsername: target_username,
+            cardId: card_id,
+            cardId2: card_id2,
+            ownerUsername: owner_username,
+            ownerUsername2: owner_username2,
+          });
+        } else if (action === "brutal_flip7") {
+          gameState = applyAction(gameState, "brutal_flip7", user, {
+            choice: brutal_choice,
             targetUsername: target_username,
           });
         } else if (action === "next_round") {

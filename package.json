@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test lib/flip-engine.test.js"
+    "test": "node --test lib/flip-engine.test.js lib/flip-vengeance.test.js"
   },
   "dependencies": {
     "pg": "^8.16.3"

@@ -94,6 +94,12 @@
         <div class="mp-sec" id="mp-sec-online" style="display:none">ONLINE NOW</div>
         <div id="mp-lobby-list"></div>
         <p class="mp-hint" id="mp-invite-hint">Select at least 2 players (3–6 total including you).</p>
+        <div class="mp-mode-pick" id="mp-mode-pick">
+          <div class="mp-hint">GAME MODE</div>
+          <label class="mp-mode-opt"><input type="radio" name="game-mode" value="classic" checked> Classic Flip 7</label>
+          <label class="mp-mode-opt"><input type="radio" name="game-mode" value="vengeance"> Flip 7: Vengeance</label>
+          <label class="mp-mode-opt" id="brutal-wrap" style="display:none"><input type="checkbox" id="brutal-mode"> Brutal Mode</label>
+        </div>
         <button class="btn btn-primary" id="mp-invite-btn" style="width:100%;margin-top:8px" disabled>INVITE SELECTED</button>
       </div>
     </div>
@@ -104,7 +110,8 @@
       </div>
       <div class="modal-body">
         <div id="mp-wait-list"></div>
-        <p class="mp-hint">Need 3–6 players to start Flip 7</p>
+        <p class="mp-hint" id="mp-wait-hint">Need 3–6 players to start</p>
+        <p class="mp-hint" id="mp-wait-mode"></p>
         <button class="btn btn-primary" id="mp-start-btn" style="width:100%" disabled>START GAME</button>
       </div>
     </div>
@@ -142,9 +149,14 @@ const STATS_URL = `${API_ORIGIN}/api/flip-stats`;
 const USERS_URL = `${API_ORIGIN}/api/flip-users`;
 
 const CARD_COLORS = {
-  number: {0:"#e8e8e8",1:"#b8b8b8",2:"#b8e986",3:"#ff6b9d",4:"#4ecdc4",5:"#6bcb77",6:"#c77dff",7:"#ff8a65",8:"#d4ed91",9:"#ffb347",10:"#ff6b6b",11:"#74b9ff",12:"#636e72"},
-  bonus: "#ffb347", multiplier: "#ffb347", freeze: "#74b9ff", flip_three: "#ffe066", second_chance: "#ff6b6b"
+  number: {0:"#e8e8e8",1:"#b8b8b8",2:"#b8e986",3:"#ff6b9d",4:"#4ecdc4",5:"#6bcb77",6:"#c77dff",7:"#ff8a65",8:"#d4ed91",9:"#ffb347",10:"#ff6b6b",11:"#74b9ff",12:"#636e72",13:"#a29bfe"},
+  bonus: "#ffb347", multiplier: "#ffb347", freeze: "#74b9ff", flip_three: "#ffe066", second_chance: "#ff6b6b",
+  mod_divide: "#fd79a8", mod_minus: "#fdcb6e",
+  just_one_more: "#55efc4", swap: "#74b9ff", steal: "#e17055", discard: "#dfe6e9", flip_four: "#ffe066"
 };
+
+let mpRoomGameMode = "classic";
+let mpRoomBrutalMode = false;
 
 let mpRoomId = null;
 let mpRole = null;
@@ -181,6 +193,23 @@ function personalizeState(state) {
   if (!me) return state;
 
   const turnPlayer = state.players?.[state.turnIndex];
+
+  if (state.gameMode === "vengeance") {
+    const pending = state.pendingChoice;
+    state.mustResolveAction = !!(pending && pending.fromUsername === me);
+    state.isMyTurn =
+      state.phase === "playing" &&
+      !pending &&
+      !state.pendingResolution &&
+      turnPlayer?.username === me;
+    state.mustResolveCard = !!(state.pendingResolution?.fromUsername === me);
+    state.mustBrutalChoice = !!(state.phase === "brutal_choice" && state.pendingBrutalFlip7?.username === me);
+    state.legalTargets = state.mustResolveAction
+      ? (pending?.canTarget || state.players.filter((p) => p.status !== "busted").map((p) => p.username))
+      : [];
+    return state;
+  }
+
   const pending = state.pendingAction;
 
   state.mustResolveAction = !!(pending && pending.fromUsername === me);
@@ -211,6 +240,15 @@ function notifyActionReceived(state) {
   const me = getUsername();
   const ev = state?.lastEvent;
   if (!me || !ev) return;
+
+  if (ev.type === "action_sent" && ev.target === me && ev.from !== me) {
+    const key = `action_sent:${ev.from}:${ev.target}:${ev.card?.id || ""}`;
+    if (key === lastNotifiedEventKey) return;
+    lastNotifiedEventKey = key;
+    showToast(`${ev.from.toUpperCase()} sent you ${ev.card?.label || "ACTION"}`, 4000);
+    return;
+  }
+
   if (ev.type !== "freeze" && ev.type !== "flip_three") return;
   if (ev.target !== me || ev.from === me) return;
 
@@ -345,6 +383,8 @@ async function returnToActiveGame(data) {
   await mpLoadAbly();
   mpRoomId = data.room_id;
   mpRole = data.role || localStorage.getItem("flip_room_role") || "player";
+  mpRoomGameMode = data.room?.game_mode || "classic";
+  mpRoomBrutalMode = !!data.room?.brutal_mode;
   persistActiveRoom(mpRoomId, mpRole);
   mpSubscribeRoom(mpRoomId);
   document.getElementById("mp-modal").classList.remove("open");
@@ -666,15 +706,20 @@ async function mpInvitePlayers() {
     return;
   }
   const invitees = [...mpSelectedPlayers];
+  const modeEl = document.querySelector('input[name="game-mode"]:checked');
+  const game_mode = modeEl?.value === "vengeance" ? "vengeance" : "classic";
+  const brutal_mode = game_mode === "vengeance" && document.getElementById("brutal-mode")?.checked;
   const r = await fetch(ROOM_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ username: getUsername(), invitees })
+    body: JSON.stringify({ username: getUsername(), invitees, game_mode, brutal_mode })
   });
   const d = await r.json();
   if (!r.ok) { showToast(d.error || "Could not create room"); return; }
   mpRoomId = d.room_id;
   mpRole = "host";
+  mpRoomGameMode = d.game_mode || game_mode;
+  mpRoomBrutalMode = !!d.brutal_mode;
   persistActiveRoom(mpRoomId, mpRole);
   mpSubscribeRoom(mpRoomId);
   mpRenderWaitList([
@@ -698,6 +743,13 @@ function mpRenderWaitList(players) {
   });
   const total = players.filter(p => p.status !== "declined").length;
   document.getElementById("mp-start-btn").disabled = accepted === 0 || total < 3;
+  const modeEl = document.getElementById("mp-wait-mode");
+  if (modeEl) {
+    const label = mpRoomGameMode === "vengeance"
+      ? `Mode: Vengeance${mpRoomBrutalMode ? " (Brutal)" : ""}`
+      : "Mode: Classic";
+    modeEl.textContent = label;
+  }
 }
 
 function mpUpdateAccepted(players) {
@@ -729,6 +781,12 @@ async function mpCancelRoom() {
 }
 
 document.getElementById("find-game-btn").addEventListener("click", openMpModal);
+document.querySelectorAll('input[name="game-mode"]').forEach(el => {
+  el.addEventListener("change", () => {
+    const v = document.querySelector('input[name="game-mode"]:checked')?.value;
+    document.getElementById("brutal-wrap").style.display = v === "vengeance" ? "block" : "none";
+  });
+});
 document.getElementById("return-game-btn").addEventListener("click", () => returnToActiveGame());
 document.getElementById("leave-game-btn").addEventListener("click", mpLeaveGame);
 document.getElementById("mp-return-btn").addEventListener("click", () => returnToActiveGame());
@@ -745,9 +803,11 @@ function cardColor(card) {
 }
 
 function cardTextColor(card) {
-  if (card.type !== "number") return "#1a1a1a";
-  const darkTextValues = [0, 1, 2, 8];
-  return darkTextValues.includes(card.value) ? "#1a1a1a" : "#fff";
+  if (card.type === "number") {
+    const darkTextValues = [0, 1, 2, 8];
+    return darkTextValues.includes(card.value) ? "#1a1a1a" : "#fff";
+  }
+  return card.type === "discard" ? "#1a1a1a" : "#1a1a1a";
 }
 
 function displayRoundPoints(p, phase) {
@@ -766,12 +826,26 @@ function setActionButtonStyles(canAct) {
 
 function renderCard(card, opts = {}) {
   const el = document.createElement("div");
-  el.className = "playing-card " + (card.type === "bonus" ? "bonus" : card.type === "multiplier" ? "multiplier" : card.type !== "number" ? "action" : "");
+  const isMod = card.type === "mod_divide" || card.type === "mod_minus";
+  const isAct = !isMod && card.type !== "number" && card.type !== "bonus" && card.type !== "multiplier";
+  el.className = "playing-card " + (card.type === "bonus" ? "bonus" : card.type === "multiplier" ? "multiplier" : isMod ? "modifier" : isAct ? "action" : "");
   if (opts.bustCard) el.classList.add("bust-card");
+  if (opts.selectable) {
+    el.classList.add("selectable-card");
+    el.dataset.cardId = card.id;
+    el.dataset.owner = opts.owner || "";
+  }
   el.style.background = cardColor(card);
   el.textContent = card.label || String(card.value);
   el.style.color = cardTextColor(card);
   return el;
+}
+
+function playerCardsList(p) {
+  if (p.numbers || p.modifiers) {
+    return [...(p.modifiers || []), ...(p.numbers || [])];
+  }
+  return p.cards || [];
 }
 
 function onGameState(state) {
@@ -779,7 +853,8 @@ function onGameState(state) {
   gameState = state;
   if (!state) return;
 
-  document.getElementById("game-round").textContent = `Round ${state.round}`;
+  document.getElementById("game-round").textContent =
+    `Round ${state.round}` + (state.gameMode === "vengeance" ? " · Vengeance" + (state.brutalMode ? " Brutal" : "") : "");
   document.getElementById("game-target").textContent = `Target: ${state.targetScore}`;
   document.getElementById("deck-info").textContent = `Cards in deck: ${state.deckCount}`;
 
@@ -809,14 +884,22 @@ function onGameState(state) {
     row.className = "player-row " + p.status + (p.username === me ? " me" : "");
     const hdr = document.createElement("div");
     hdr.className = "player-hdr";
-    hdr.innerHTML = `<span class="player-name">${p.username.toUpperCase()} (${pts})${p.flip7ThisRound ? " ★ FLIP 7" : ""}</span><span class="player-status">${p.status === "busted" ? "busted" : p.status}${p.hasSecondChance ? " · 2nd chance" : ""}</span>`;
+    hdr.innerHTML = `<span class="player-name">${p.username.toUpperCase()} (${pts})${p.flip7ThisRound ? " ★ FLIP 7" : ""}${p.hasZero ? " · ZERO" : ""}</span><span class="player-status">${p.status === "busted" ? "busted" : p.status}${p.hasSecondChance ? " · 2nd chance" : ""}</span>`;
     row.appendChild(hdr);
-    const cards = document.createElement("div");
-    cards.className = "card-row";
-    p.cards.forEach(c => {
+    const modRow = document.createElement("div");
+    modRow.className = "card-row modifier-row";
+    const numRow = document.createElement("div");
+    numRow.className = "card-row";
+    const isV = state.gameMode === "vengeance";
+    const numbers = isV ? (p.numbers || []) : (p.cards || []).filter(c => c.type === "number" || !c.type);
+    const modifiers = isV ? (p.modifiers || []) : (p.cards || []).filter(c => c.type === "bonus" || c.type === "multiplier");
+    modifiers.forEach(c => modRow.appendChild(renderCard(c)));
+    numbers.forEach(c => {
       const isBustCard = p.status === "busted" && p.username === bustUser && c.id === bustCardId;
-      cards.appendChild(renderCard(c, { bustCard: isBustCard }));
+      numRow.appendChild(renderCard(c, { bustCard: isBustCard }));
     });
+    if (modRow.childElementCount) row.appendChild(modRow);
+    const cards = numRow;
     if (p.hasSecondChance) {
       const sc = document.createElement("div");
       sc.className = "playing-card action";
@@ -825,7 +908,7 @@ function onGameState(state) {
       sc.title = "Held — discards on duplicate number";
       cards.appendChild(sc);
     }
-    if (!p.cards.length && !p.hasSecondChance && p.status === "active") {
+    if (!numbers.length && !modifiers.length && !p.hasSecondChance && p.status === "active") {
       const empty = document.createElement("span");
       empty.className = "mp-hint";
       empty.textContent = "No cards yet";
@@ -854,6 +937,79 @@ function onGameState(state) {
   } else if (state.phase === "game_over") {
     hitBtn.disabled = stayBtn.disabled = true;
     setActionButtonStyles(false);
+  } else if (state.phase === "brutal_choice" && state.mustBrutalChoice) {
+    hitBtn.disabled = stayBtn.disabled = true;
+    setActionButtonStyles(false);
+    prompt.style.display = "block";
+    document.getElementById("action-prompt-text").textContent = "You Flip 7! Take +15 or penalize another player:";
+    const tb = document.getElementById("target-btns");
+    tb.innerHTML = "";
+    const takeBtn = document.createElement("button");
+    takeBtn.className = "btn";
+    takeBtn.textContent = "TAKE +15";
+    takeBtn.addEventListener("click", () => gameAction("brutal_flip7", null, { brutal_choice: "take" }));
+    tb.appendChild(takeBtn);
+    state.players.filter(p => p.username !== me).forEach(p => {
+      const b = document.createElement("button");
+      b.className = "btn";
+      b.textContent = `−15 ${p.username.toUpperCase()}`;
+      b.addEventListener("click", () => gameAction("brutal_flip7", p.username, { brutal_choice: "penalize" }));
+      tb.appendChild(b);
+    });
+  } else if (state.mustResolveCard && state.pendingResolution) {
+    hitBtn.disabled = stayBtn.disabled = true;
+    setActionButtonStyles(false);
+    prompt.style.display = "block";
+    const pr = state.pendingResolution;
+    const tb = document.getElementById("target-btns");
+    tb.innerHTML = "";
+    if (pr.type === "flip_four_pick") {
+      document.getElementById("action-prompt-text").textContent = "FLIP 4 — choose a player:";
+      state.players.filter(p => p.status !== "busted").forEach(p => {
+        const b = document.createElement("button");
+        b.className = "btn";
+        b.textContent = p.username.toUpperCase();
+        b.addEventListener("click", () => gameAction("resolve_card", p.username));
+        tb.appendChild(b);
+      });
+    } else if (pr.type === "steal" || pr.type === "discard") {
+      document.getElementById("action-prompt-text").textContent =
+        pr.type === "steal" ? "STEAL — pick a card:" : "DISCARD — pick a card to remove:";
+      (state.swappableCards || []).forEach(({ username, card }) => {
+        const b = document.createElement("button");
+        b.className = "btn";
+        b.textContent = `${username.toUpperCase()}: ${card.label}`;
+        b.addEventListener("click", () => gameAction("resolve_card", username, { card_id: card.id }));
+        tb.appendChild(b);
+      });
+    } else if (pr.type === "swap") {
+      document.getElementById("action-prompt-text").textContent = swapPickStep === 0
+        ? "SWAP — pick first card:" : "SWAP — pick second card:";
+      (state.swappableCards || []).forEach(({ username, card }) => {
+        if (swapPickStep === 1 && swapPickFirst?.card.id === card.id && swapPickFirst?.username === username) return;
+        const b = document.createElement("button");
+        b.className = "btn";
+        b.textContent = `${username.toUpperCase()}: ${card.label}`;
+        b.addEventListener("click", () => onSwapCardPick(username, card.id));
+        tb.appendChild(b);
+      });
+    }
+  } else if (state.mustResolveAction && state.pendingChoice) {
+    hitBtn.disabled = stayBtn.disabled = true;
+    setActionButtonStyles(false);
+    prompt.style.display = "block";
+    const cardLabel = state.pendingChoice.card?.label || state.pendingChoice.category?.toUpperCase();
+    document.getElementById("action-prompt-text").textContent =
+      `You drew ${cardLabel} — keep for yourself or give to another player:`;
+    const tb = document.getElementById("target-btns");
+    tb.innerHTML = "";
+    (state.legalTargets || []).forEach(t => {
+      const b = document.createElement("button");
+      b.className = "btn";
+      b.textContent = t === me ? `${t.toUpperCase()} (KEEP)` : t.toUpperCase();
+      b.addEventListener("click", () => gameAction("play_action", t));
+      tb.appendChild(b);
+    });
   } else if (state.mustResolveAction && state.pendingAction) {
     hitBtn.disabled = stayBtn.disabled = true;
     setActionButtonStyles(false);
@@ -884,9 +1040,34 @@ function onGameState(state) {
   }
 }
 
-async function gameAction(action, targetUsername) {
+let swapPickStep = 0;
+let swapPickFirst = null;
+
+function onSwapCardPick(owner, cardId) {
+  if (swapPickStep === 0) {
+    swapPickFirst = { username: owner, card: { id: cardId } };
+    swapPickStep = 1;
+    onGameState(gameState);
+    return;
+  }
+  gameAction("resolve_card", null, {
+    card_id: swapPickFirst.card.id,
+    card_id2: cardId,
+    owner_username: swapPickFirst.username,
+    owner_username2: owner
+  });
+  swapPickStep = 0;
+  swapPickFirst = null;
+}
+
+async function gameAction(action, targetUsername, extra = {}) {
   const body = { action, room_id: mpRoomId, username: getUsername() };
   if (targetUsername) body.target_username = targetUsername;
+  if (extra.brutal_choice) body.brutal_choice = extra.brutal_choice;
+  if (extra.card_id) body.card_id = extra.card_id;
+  if (extra.card_id2) body.card_id2 = extra.card_id2;
+  if (extra.owner_username) body.owner_username = extra.owner_username;
+  if (extra.owner_username2) body.owner_username2 = extra.owner_username2;
   try {
     const r = await fetch(GAME_URL, {
       method: "PATCH",

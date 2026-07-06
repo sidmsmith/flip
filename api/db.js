@@ -38,11 +38,20 @@ export async function ensureFlipTables(client) {
       host_username VARCHAR(64) NOT NULL,
       status VARCHAR(16) NOT NULL DEFAULT 'lobby',
       target_score INTEGER NOT NULL DEFAULT 200,
+      game_mode VARCHAR(16) NOT NULL DEFAULT 'classic',
+      brutal_mode BOOLEAN NOT NULL DEFAULT false,
       game_state JSONB,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       started_at TIMESTAMP,
       ended_at TIMESTAMP
     )
+  `);
+
+  await client.query(`
+    ALTER TABLE flip_rooms ADD COLUMN IF NOT EXISTS game_mode VARCHAR(16) NOT NULL DEFAULT 'classic'
+  `);
+  await client.query(`
+    ALTER TABLE flip_rooms ADD COLUMN IF NOT EXISTS brutal_mode BOOLEAN NOT NULL DEFAULT false
   `);
 
   await client.query(`

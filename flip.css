@@ -313,6 +313,12 @@ header {
 }
 
 .mp-prow:hover { background: var(--surface2); }
+.mp-mode-pick { margin: 12px 0; text-align: left; }
+.mp-mode-opt { display: block; margin: 6px 0; font-size: 0.9rem; cursor: pointer; }
+.modifier-row { margin-bottom: 4px; min-height: 0; }
+.modifier-row .playing-card { transform: scale(0.92); }
+.selectable-card { cursor: pointer; outline: 2px solid transparent; }
+.selectable-card:hover { outline-color: var(--accent2); }
 .mp-prow.sel { border-color: var(--accent2); background: rgba(78,205,196,0.1); }
 .mp-prow.unavail { opacity: 0.45; cursor: default; }
 
