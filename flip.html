@@ -315,9 +315,30 @@ function notifySecondChancePlayed(state) {
   }
 }
 
+function notifyActionDiscarded(state) {
+  const me = getUsername();
+  const ev = state?.lastEvent;
+  if (!ev || ev.type !== "action_discarded") return;
+
+  const key = `action_discarded:${ev.from}:${ev.card?.id || ""}:${ev.reason || ""}`;
+  if (key === lastNotifiedEventKey) return;
+  lastNotifiedEventKey = key;
+
+  const cardName = ev.card?.label || "Action card";
+  const who = (ev.from || "?").toUpperCase();
+  const why = ev.reason === "no_valid_swap"
+    ? "needs cards on two different players"
+    : "no valid targets";
+  const msg = ev.from === me
+    ? `Your ${cardName} was discarded — ${why}`
+    : `${who}'s ${cardName} was discarded — ${why}`;
+  showToast(msg, 4000);
+}
+
 function notifyGameEvents(state) {
   notifyActionReceived(state);
   notifySecondChancePlayed(state);
+  notifyActionDiscarded(state);
 }
 
 function showView(name) {
