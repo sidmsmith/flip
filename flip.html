@@ -557,21 +557,76 @@ async function loadUserChips() {
   } catch (_) {}
 }
 
-function saveUsername() {
+async function saveUsername() {
   const raw = document.getElementById("user-input").value.trim().slice(0, 32);
   if (!raw) return;
-  localStorage.setItem("flip_username", raw.toLowerCase());
+  const next = raw.toLowerCase();
+  const previous = getUsername();
+
+  if (previous && next === previous) {
+    document.getElementById("user-modal").classList.remove("open");
+    return;
+  }
+
+  if (previous) {
+    try {
+      const r = await fetch(`${ROOM_URL}?username=${encodeURIComponent(previous)}`);
+      const d = await r.json();
+      if (d?.room?.status === "active") {
+        showToast("Finish or leave your game before changing names.");
+        document.getElementById("user-input").value = previous;
+        return;
+      }
+    } catch (_) {}
+  }
+
+  localStorage.setItem("flip_username", next);
   document.getElementById("user-modal").classList.remove("open");
   updateHomeUser();
-  mpLoadAbly().then(async () => {
+
+  if (previous && previous !== next) {
+    try {
+      const r = await fetch(ROOM_URL, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "rename_username",
+          username: next,
+          previous_username: previous,
+        }),
+      });
+      const d = await r.json();
+      if (!r.ok) {
+        showToast(d.error || "Could not update room membership for new name.");
+      } else if (d.room_id) {
+        mpRoomId = d.room_id;
+        if (d.role) mpRole = d.role;
+        persistActiveRoom(mpRoomId, mpRole);
+      }
+    } catch (_) {}
+  }
+
+  try {
+    await mpLoadAbly();
     mpSubscribeLobby();
     mpStartBgHeartbeat();
-    const data = await fetchActiveRoom();
-    if (data?.room_id) {
-      updateReturnGameUI(true);
+    await mpSendHeartbeat(previous && previous !== next ? previous : null);
+  } catch (_) {}
+
+  const data = await fetchActiveRoom();
+  if (data?.room_id) {
+    updateReturnGameUI(true);
+    if (data.room.status === "active") {
       await returnToActiveGame(data);
+      return;
     }
-  }).catch(() => {});
+    if (document.getElementById("mp-modal").classList.contains("open")) {
+      showLobbyWaitingView(data);
+    }
+  }
+  if (document.getElementById("mp-modal").classList.contains("open")) {
+    await mpLoadLobbyPlayers();
+  }
 }
 
 document.getElementById("user-btn").addEventListener("click", openUserModal);
@@ -611,7 +666,7 @@ function mpSubscribeLobby() {
   });
   mpLobbyChannel.subscribe("room-abandoned", msg => {
     const d = JSON.parse(msg.data || "{}");
-    if (mpRoomId === d.room_id || !d.room_id) {
+    if (d.room_id && mpRoomId === d.room_id) {
       handleRoomAbandoned(d.abandoned_by);
     }
     mpPendingInvites = mpPendingInvites.filter(i => i.room_id !== d.room_id);
@@ -666,14 +721,16 @@ function mpStopBgHeartbeat() {
   mpHeartbeatTimer = null;
 }
 
-async function mpSendHeartbeat() {
+async function mpSendHeartbeat(previousUsername = null) {
   const u = getUsername();
   if (!u) return;
+  const body = { username: u };
+  if (previousUsername) body.previous_username = previousUsername;
   try {
     await fetch(HEARTBEAT_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username: u })
+      body: JSON.stringify(body)
     });
   } catch (_) {}
 }

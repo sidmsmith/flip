@@ -1,6 +1,10 @@
 import { getPool, cors, ensureFlipTables } from "./db.js";
 import { ablyPublish, LOBBY_CHANNEL, roomChannel } from "./ably.js";
 import { MIN_PLAYERS, MAX_PLAYERS, minPlayersForMode } from "../lib/flip-deck.js";
+import {
+  abandonStaleLobbyRooms,
+  assertInviteesAvailable,
+} from "./flip-lobby-util.js";
 
 async function getRoomWithPlayers(client, roomId) {
   const { rows: roomRows } = await client.query(
@@ -22,6 +26,7 @@ export default async function handler(req, res) {
   const client = await getPool().connect();
   try {
     await ensureFlipTables(client);
+    await abandonStaleLobbyRooms(client);
 
     if (req.method === "POST") {
       const { username, invitees = [], game_mode = "classic", brutal_mode = false } =
@@ -47,6 +52,9 @@ export default async function handler(req, res) {
           error: `${mode === "vengeance" ? "Vengeance" : "Classic"} requires ${minP}-${MAX_PLAYERS} players (${totalPlayers} selected).`,
         });
       }
+
+      const availErr = await assertInviteesAvailable(client, uniqueInvitees);
+      if (availErr) return res.status(400).json({ error: availErr });
 
       const { rows: [room] } = await client.query(
         `INSERT INTO flip_rooms (host_username, game_mode, brutal_mode) VALUES ($1,$2,$3) RETURNING id`,
@@ -134,11 +142,69 @@ export default async function handler(req, res) {
     }
 
     if (req.method === "PATCH") {
-      const { action, room_id, username } = req.body || {};
+      const { action, room_id, username, previous_username } = req.body || {};
+      const user = username ? username.toLowerCase() : null;
+
+      if (action === "rename_username") {
+        const prev = previous_username ? String(previous_username).toLowerCase() : null;
+        const next = user;
+        if (!prev || !next || prev === next) {
+          return res.status(400).json({ error: "previous_username and username required" });
+        }
+
+        const { rows: memberships } = await client.query(
+          `SELECT fr.id, fr.status, fr.host_username, fp.role
+           FROM flip_room_players fp
+           JOIN flip_rooms fr ON fr.id = fp.room_id
+           WHERE fp.username = $1 AND fr.status IN ('lobby', 'active')
+           ORDER BY fr.created_at DESC
+           LIMIT 1`,
+          [prev]
+        );
+        if (!memberships.length) {
+          return res.status(200).json({ ok: true, room_id: null });
+        }
+
+        const { id: rid, status, host_username, role } = memberships[0];
+        if (status === "active") {
+          return res.status(400).json({ error: "Cannot rename during an active game." });
+        }
+
+        const { rows: taken } = await client.query(
+          `SELECT 1 FROM flip_room_players WHERE room_id = $1 AND username = $2 LIMIT 1`,
+          [rid, next]
+        );
+        if (taken.length) {
+          return res.status(400).json({ error: "That name is already in this room." });
+        }
+
+        await client.query(
+          `UPDATE flip_room_players SET username = $3 WHERE room_id = $1 AND username = $2`,
+          [rid, prev, next]
+        );
+        if (host_username === prev) {
+          await client.query(`UPDATE flip_rooms SET host_username = $2 WHERE id = $1`, [rid, next]);
+        }
+
+        const { players } = await getRoomWithPlayers(client, rid);
+        await ablyPublish(roomChannel(rid), "player-status", { players });
+
+        for (const p of players) {
+          if (p.status === "invited" && p.username === next) {
+            await ablyPublish(LOBBY_CHANNEL, "invite", {
+              invitee: next,
+              host: players.find((x) => x.role === "host")?.username || host_username,
+              room_id: rid,
+            });
+          }
+        }
+
+        return res.status(200).json({ ok: true, room_id: rid, role });
+      }
+
       if (!action || !room_id) {
         return res.status(400).json({ error: "action and room_id required" });
       }
-      const user = username ? username.toLowerCase() : null;
 
       if (action === "accept") {
         await client.query(
