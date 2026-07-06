@@ -279,6 +279,24 @@ function notifyActionReceived(state) {
   const ev = state?.lastEvent;
   if (!me || !ev) return;
 
+  if (ev.type === "action_assigned" && ev.recipient === me && ev.from !== me) {
+    const key = `action_assigned:${ev.from}:${ev.recipient}:${ev.card?.id || ""}`;
+    if (key === lastNotifiedEventKey) return;
+    lastNotifiedEventKey = key;
+    const cardName = ev.card?.label || "ACTION";
+    showToast(`${ev.from.toUpperCase()} assigned ${cardName} to you`, 4000);
+    return;
+  }
+
+  if (ev.type === "modifier_assigned" && ev.recipient === me && ev.from !== me) {
+    const key = `modifier_assigned:${ev.from}:${ev.recipient}:${ev.card?.id || ""}`;
+    if (key === lastNotifiedEventKey) return;
+    lastNotifiedEventKey = key;
+    const cardName = ev.card?.label || "MODIFIER";
+    showToast(`${ev.from.toUpperCase()} put ${cardName} on your hand`, 4000);
+    return;
+  }
+
   if (ev.type === "action_sent" && ev.target === me && ev.from !== me) {
     const key = `action_sent:${ev.from}:${ev.target}:${ev.card?.id || ""}`;
     if (key === lastNotifiedEventKey) return;
@@ -1112,18 +1130,31 @@ function onGameState(state) {
     const pc = state.pendingChoice;
     const cardLabel = pc.card?.label || pc.category?.toUpperCase();
     const isModifier = pc.category === "modifier";
+    const inFlipFour = !!state.flipFourPending;
     document.getElementById("action-prompt-text").textContent = isModifier
-      ? `You drew ${cardLabel} — keep the modifier or give it to another player (it goes on their hand):`
-      : `You drew ${cardLabel} — keep it (you play it) or give it to another player (they play it):`;
+      ? inFlipFour
+        ? `Who receives ${cardLabel}? (choose whose hand it goes on)`
+        : `Who receives ${cardLabel}? (choose whose hand it goes on)`
+      : inFlipFour
+        ? `Who receives ${cardLabel}? (choose who the action applies to)`
+        : `Who receives ${cardLabel}? (choose who the action applies to)`;
     const tb = document.getElementById("target-btns");
     tb.innerHTML = "";
     (state.legalTargets || []).forEach(t => {
       const b = document.createElement("button");
       b.className = "btn";
-      b.textContent = t === me ? `${t.toUpperCase()} (KEEP)` : `${t.toUpperCase()} (GIVE)`;
+      b.textContent = t === me ? `${t.toUpperCase()} (YOU)` : t.toUpperCase();
       b.addEventListener("click", () => gameAction("play_action", t));
       tb.appendChild(b);
     });
+  } else if (state.pendingChoice && state.gameMode === "vengeance" && !state.mustResolveAction) {
+    hitBtn.disabled = stayBtn.disabled = true;
+    setActionButtonStyles(false);
+    prompt.style.display = "none";
+    document.getElementById("target-btns").innerHTML = "";
+    const who = state.pendingChoice.fromUsername?.toUpperCase() || "?";
+    document.getElementById("game-turn").textContent =
+      `Waiting for ${who} to choose who receives ${state.pendingChoice.card?.label || "the card"}…`;
   } else if (state.pendingResolution && state.gameMode === "vengeance" && !state.mustResolveCard) {
     hitBtn.disabled = stayBtn.disabled = true;
     setActionButtonStyles(false);
@@ -1131,7 +1162,7 @@ function onGameState(state) {
     document.getElementById("target-btns").innerHTML = "";
     const who = state.pendingResolution.fromUsername?.toUpperCase() || "?";
     const actionLabel = (state.pendingResolution.type || "action").replace(/_/g, " ").toUpperCase();
-    document.getElementById("game-turn").textContent = `Waiting for ${who} to resolve ${actionLabel}…`;
+    document.getElementById("game-turn").textContent = `Waiting for ${who} to complete ${actionLabel}…`;
   } else if (state.mustResolveAction && state.pendingAction) {
     hitBtn.disabled = stayBtn.disabled = true;
     setActionButtonStyles(false);
