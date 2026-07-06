@@ -1075,18 +1075,29 @@ function onGameState(state) {
     hitBtn.disabled = stayBtn.disabled = true;
     setActionButtonStyles(false);
     prompt.style.display = "block";
-    const cardLabel = state.pendingChoice.card?.label || state.pendingChoice.category?.toUpperCase();
-    document.getElementById("action-prompt-text").textContent =
-      `You drew ${cardLabel} — keep for yourself or give to another player:`;
+    const pc = state.pendingChoice;
+    const cardLabel = pc.card?.label || pc.category?.toUpperCase();
+    const isModifier = pc.category === "modifier";
+    document.getElementById("action-prompt-text").textContent = isModifier
+      ? `You drew ${cardLabel} — keep the modifier or give it to another player (it goes on their hand):`
+      : `You drew ${cardLabel} — keep it (you play it) or give it to another player (they play it):`;
     const tb = document.getElementById("target-btns");
     tb.innerHTML = "";
     (state.legalTargets || []).forEach(t => {
       const b = document.createElement("button");
       b.className = "btn";
-      b.textContent = t === me ? `${t.toUpperCase()} (KEEP)` : t.toUpperCase();
+      b.textContent = t === me ? `${t.toUpperCase()} (KEEP)` : `${t.toUpperCase()} (GIVE)`;
       b.addEventListener("click", () => gameAction("play_action", t));
       tb.appendChild(b);
     });
+  } else if (state.pendingResolution && state.gameMode === "vengeance" && !state.mustResolveCard) {
+    hitBtn.disabled = stayBtn.disabled = true;
+    setActionButtonStyles(false);
+    prompt.style.display = "none";
+    document.getElementById("target-btns").innerHTML = "";
+    const who = state.pendingResolution.fromUsername?.toUpperCase() || "?";
+    const actionLabel = (state.pendingResolution.type || "action").replace(/_/g, " ").toUpperCase();
+    document.getElementById("game-turn").textContent = `Waiting for ${who} to resolve ${actionLabel}…`;
   } else if (state.mustResolveAction && state.pendingAction) {
     hitBtn.disabled = stayBtn.disabled = true;
     setActionButtonStyles(false);
