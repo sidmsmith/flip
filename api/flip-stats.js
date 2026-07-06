@@ -30,7 +30,7 @@ export default async function handler(req, res) {
   try {
     await ensureFlipTables(client);
 
-    const [meRes, overallRes, mpRes, flip7Res, bustRes] = await Promise.all([
+    const [meRes, overallRes, mpRes, flip7Res, bustRes, soloRes] = await Promise.all([
       client.query(
         `SELECT outcome, final_score, rounds_played
          FROM flip_games WHERE LOWER(username) = LOWER($1)
@@ -64,6 +64,15 @@ export default async function handler(req, res) {
            COUNT(*) FILTER (WHERE outcome = 'loss')::int AS losses,
            COUNT(*)::int AS total
          FROM flip_games WHERE LOWER(username) = LOWER($1)`,
+        [username]
+      ),
+      client.query(
+        `SELECT rounds_played, rounds_json, end_time
+         FROM flip_games
+         WHERE LOWER(username) = LOWER($1)
+           AND outcome = 'win'
+           AND jsonb_array_length(players_json) = 1
+         ORDER BY end_time DESC`,
         [username]
       ),
     ]);
@@ -126,6 +135,21 @@ export default async function handler(req, res) {
     const bustTotal = Number(bustRes.rows[0]?.total) || 0;
     const bustLosses = Number(bustRes.rows[0]?.losses) || 0;
 
+    const soloRows = soloRes.rows;
+    const soloWins = soloRows.length;
+    const soloRoundCounts = soloRows.map((r) => {
+      const rj = r.rounds_json;
+      if (rj && typeof rj === "object" && rj.rounds_to_200) {
+        return Number(rj.rounds_to_200);
+      }
+      return Number(r.rounds_played) || 0;
+    }).filter((n) => n > 0);
+    const soloBest = soloRoundCounts.length ? Math.min(...soloRoundCounts) : null;
+    const soloAvg = soloRoundCounts.length
+      ? Math.round(soloRoundCounts.reduce((a, b) => a + b, 0) / soloRoundCounts.length)
+      : null;
+    const soloLast = soloRoundCounts[0] ?? null;
+
     return res.status(200).json({
       me: {
         totalGames: meTotal,
@@ -149,6 +173,12 @@ export default async function handler(req, res) {
         losses: mpMatches - mpWins,
         winPct: mpMatches > 0 ? Math.round((mpWins / mpMatches) * 100) : 0,
         headToHead,
+      },
+      soloStats: {
+        wins: soloWins,
+        bestRounds: soloBest,
+        avgRounds: soloAvg,
+        lastRounds: soloLast,
       },
     });
   } finally {

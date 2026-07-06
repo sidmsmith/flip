@@ -18,7 +18,7 @@
 
   <div id="view-home">
     <div class="home-title">Push Your Luck</div>
-    <p class="home-sub">Collect 7 unique numbers to Flip 7. First to 200 points wins. Play with 3–6 friends online.</p>
+    <p class="home-sub">Collect 7 unique numbers to Flip 7. First to 200 points wins. Classic: 1–6 players. Vengeance: 2–6 players.</p>
     <div class="user-badge" id="home-user">Set your name to play</div>
     <button class="btn btn-primary" id="find-game-btn">FIND GAME</button>
     <button class="btn btn-accent" id="return-game-btn" style="display:none">RETURN TO GAME</button>
@@ -51,6 +51,8 @@
     <div class="stat-grid" id="stat-me"></div>
     <div class="stat-section-title">OVERALL</div>
     <div class="stat-grid" id="stat-overall"></div>
+    <div class="stat-section-title">SOLO CLASSIC</div>
+    <div class="stat-grid" id="stat-solo"></div>
     <div class="stat-section-title">MULTIPLAYER</div>
     <div class="stat-grid" id="stat-mp"></div>
     <div id="stat-h2h"></div>
@@ -171,19 +173,46 @@ let gameState = null;
 let gameSynced = false;
 let lastNotifiedEventKey = null;
 
-const MIN_INVITEES = 2; // host + 2 = minimum 3 players for Flip 7
+const MIN_INVITEES_VENGEANCE = 1;
+const MAX_INVITEES = 5;
+
+function selectedGameMode() {
+  return document.querySelector('input[name="game-mode"]:checked')?.value === "vengeance"
+    ? "vengeance"
+    : "classic";
+}
+
+function updateInviteHint() {
+  const mode = selectedGameMode();
+  const hint = document.getElementById("mp-invite-hint");
+  const wait = document.getElementById("mp-wait-hint");
+  if (mode === "vengeance") {
+    hint.textContent = "Select 1–5 players (2–6 total including you).";
+    if (wait) wait.textContent = "Need 2–6 players to start";
+  } else {
+    hint.textContent = "Select 0 for solo, or 1–5 players (1–6 total).";
+    if (wait) wait.textContent = "Need 1–6 players to start";
+  }
+}
 
 function getUsername() {
   return (localStorage.getItem("flip_username") || "").trim().toLowerCase();
 }
 
 function updateInviteBtn() {
+  const mode = selectedGameMode();
   const n = mpSelectedPlayers.size;
   const btn = document.getElementById("mp-invite-btn");
-  btn.disabled = n < MIN_INVITEES;
-  btn.textContent = n >= MIN_INVITEES
-    ? `INVITE SELECTED (${n})`
-    : `INVITE SELECTED (${n}/${MIN_INVITEES} min)`;
+  const min = mode === "vengeance" ? MIN_INVITEES_VENGEANCE : 0;
+  btn.disabled = n < min || n > MAX_INVITEES;
+  if (mode === "classic" && n === 0) {
+    btn.textContent = "START SOLO";
+  } else if (n >= min) {
+    btn.textContent = `INVITE SELECTED (${n})`;
+  } else {
+    btn.textContent = `INVITE SELECTED (${n}/${min} min)`;
+  }
+  updateInviteHint();
 }
 
 /** Ably broadcasts omit per-user flags — compute locally. */
@@ -614,6 +643,7 @@ async function openMpModal() {
   mpLobbyRefreshTimer = setInterval(mpLoadLobbyPlayers, 10000);
   mpRenderInvitations();
   await mpLoadLobbyPlayers();
+  updateInviteBtn();
 }
 
 function closeMpModal() {
@@ -701,8 +731,11 @@ async function mpDeclineInvite(inv, idx) {
 }
 
 async function mpInvitePlayers() {
-  if (mpSelectedPlayers.size < MIN_INVITEES) {
-    showToast(`Select at least ${MIN_INVITEES} players`);
+  const mode = selectedGameMode();
+  const n = mpSelectedPlayers.size;
+  const min = mode === "vengeance" ? MIN_INVITEES_VENGEANCE : 0;
+  if (n < min) {
+    showToast(mode === "vengeance" ? "Select at least 1 player" : "Invalid selection");
     return;
   }
   const invitees = [...mpSelectedPlayers];
@@ -742,7 +775,12 @@ function mpRenderWaitList(players) {
     if (p.status === "accepted" && p.role !== "host") accepted++;
   });
   const total = players.filter(p => p.status !== "declined").length;
-  document.getElementById("mp-start-btn").disabled = accepted === 0 || total < 3;
+  const minTotal = mpRoomGameMode === "vengeance" ? 2 : 1;
+  const ready =
+    mpRoomGameMode === "classic" && total === 1
+      ? true
+      : players.filter(p => p.status === "accepted" && p.role !== "host").length >= total - 1;
+  document.getElementById("mp-start-btn").disabled = total < minTotal || !ready;
   const modeEl = document.getElementById("mp-wait-mode");
   if (modeEl) {
     const label = mpRoomGameMode === "vengeance"
@@ -783,8 +821,9 @@ async function mpCancelRoom() {
 document.getElementById("find-game-btn").addEventListener("click", openMpModal);
 document.querySelectorAll('input[name="game-mode"]').forEach(el => {
   el.addEventListener("change", () => {
-    const v = document.querySelector('input[name="game-mode"]:checked')?.value;
+    const v = selectedGameMode();
     document.getElementById("brutal-wrap").style.display = v === "vengeance" ? "block" : "none";
+    updateInviteBtn();
   });
 });
 document.getElementById("return-game-btn").addEventListener("click", () => returnToActiveGame());
@@ -1093,11 +1132,18 @@ function showRoundResult(state) {
 
 function showGameOver(state, winner) {
   const me = getUsername();
-  const iWon = winner === me;
-  document.getElementById("result-title").textContent = iWon ? "YOU WIN!" : `${(winner || "").toUpperCase()} WINS!`;
-  document.getElementById("result-body").textContent = state.players
-    .map(p => `${p.username.toUpperCase()}: ${p.totalScore}`)
-    .join("\n");
+  const isSolo = state.solo || state.players.length === 1;
+  if (isSolo) {
+    document.getElementById("result-title").textContent = "SOLO WIN!";
+    document.getElementById("result-body").textContent =
+      `You reached ${state.targetScore} in ${state.round} round${state.round === 1 ? "" : "s"}.\nFinal score: ${state.players[0]?.totalScore ?? 0}`;
+  } else {
+    const iWon = winner === me;
+    document.getElementById("result-title").textContent = iWon ? "YOU WIN!" : `${(winner || "").toUpperCase()} WINS!`;
+    document.getElementById("result-body").textContent = state.players
+      .map(p => `${p.username.toUpperCase()}: ${p.totalScore}`)
+      .join("\n");
+  }
   document.getElementById("result-modal").classList.add("open");
   if (!gameSynced) {
     gameSynced = true;
@@ -1109,6 +1155,7 @@ async function syncGameResult(state, winner) {
   const me = getUsername();
   const myPlayer = state.players.find(p => p.username === me);
   if (!myPlayer) return;
+  const isSolo = state.solo || state.players.length === 1;
   const clientId = `${mpRoomId}-${Date.now()}-${me}`;
   try {
     await fetch(SYNC_URL, {
@@ -1121,10 +1168,17 @@ async function syncGameResult(state, winner) {
           username: me,
           start_time: new Date(Date.now() - state.round * 60000).toISOString(),
           end_time: new Date().toISOString(),
-          outcome: winner === me ? "win" : "loss",
+          outcome: isSolo || winner === me ? "win" : "loss",
           final_score: myPlayer.totalScore,
           rounds_played: state.round,
-          players_json: state.players.map(p => ({ username: p.username, score: p.totalScore, placement: p.username === winner ? 1 : 2 }))
+          players_json: state.players.map(p => ({
+            username: p.username,
+            score: p.totalScore,
+            placement: isSolo ? 1 : (p.username === winner ? 1 : 2)
+          })),
+          rounds_json: isSolo
+            ? { mode: "solo_classic", rounds_to_200: state.round, target_score: state.targetScore }
+            : null
         }]
       })
     });
@@ -1155,6 +1209,12 @@ async function loadStats() {
     renderStatGrid("stat-overall", [
       ["All Games", d.overall.totalGames], ["Win %", d.overall.winPct + "%"],
       ["Avg Score", d.overall.avgFinalScore], ["Best Score", d.overall.bestScore]
+    ]);
+    renderStatGrid("stat-solo", [
+      ["Solo Wins", d.soloStats?.wins ?? 0],
+      ["Best Rounds", d.soloStats?.bestRounds ?? "—"],
+      ["Avg Rounds", d.soloStats?.avgRounds ?? "—"],
+      ["Last Run", d.soloStats?.lastRounds ?? "—"]
     ]);
     renderStatGrid("stat-mp", [
       ["MP Games", d.mpStats.matches], ["MP Win %", d.mpStats.winPct + "%"],

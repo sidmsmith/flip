@@ -1,6 +1,6 @@
 import { getPool, cors, ensureFlipTables } from "./db.js";
 import { ablyPublish, LOBBY_CHANNEL, roomChannel } from "./ably.js";
-import { MIN_PLAYERS, MAX_PLAYERS } from "../lib/flip-deck.js";
+import { MIN_PLAYERS, MAX_PLAYERS, minPlayersForMode } from "../lib/flip-deck.js";
 
 async function getRoomWithPlayers(client, roomId) {
   const { rows: roomRows } = await client.query(
@@ -27,21 +27,26 @@ export default async function handler(req, res) {
       const { username, invitees = [], game_mode = "classic", brutal_mode = false } =
         req.body || {};
       if (!username) return res.status(400).json({ error: "username required" });
-      if (!invitees.length) return res.status(400).json({ error: "invitees required" });
 
       const host = username.toLowerCase();
+      const mode = game_mode === "vengeance" ? "vengeance" : "classic";
+      const brutal = mode === "vengeance" && !!brutal_mode;
+      const minP = minPlayersForMode(mode);
+
       const uniqueInvitees = [...new Set(invitees.map((i) => i.toLowerCase()))].filter(
         (i) => i !== host
       );
-      const totalPlayers = 1 + uniqueInvitees.length;
-      if (totalPlayers < MIN_PLAYERS || totalPlayers > MAX_PLAYERS) {
-        return res.status(400).json({
-          error: `Flip 7 requires ${MIN_PLAYERS}-${MAX_PLAYERS} players (${totalPlayers} selected).`,
-        });
+
+      if (uniqueInvitees.length === 0 && mode === "vengeance") {
+        return res.status(400).json({ error: "Vengeance requires at least one other player." });
       }
 
-      const mode = game_mode === "vengeance" ? "vengeance" : "classic";
-      const brutal = mode === "vengeance" && !!brutal_mode;
+      const totalPlayers = 1 + uniqueInvitees.length;
+      if (totalPlayers < minP || totalPlayers > MAX_PLAYERS) {
+        return res.status(400).json({
+          error: `${mode === "vengeance" ? "Vengeance" : "Classic"} requires ${minP}-${MAX_PLAYERS} players (${totalPlayers} selected).`,
+        });
+      }
 
       const { rows: [room] } = await client.query(
         `INSERT INTO flip_rooms (host_username, game_mode, brutal_mode) VALUES ($1,$2,$3) RETURNING id`,

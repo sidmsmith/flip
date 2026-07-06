@@ -4,7 +4,7 @@ import {
   createInitialState,
   applyAction,
   publicState,
-  MIN_PLAYERS,
+  minPlayersForMode,
 } from "../lib/flip-game-router.js";
 
 async function loadRoom(client, roomId) {
@@ -96,9 +96,10 @@ export default async function handler(req, res) {
         const accepted = players.filter(
           (p) => p.status === "accepted" || p.role === "host"
         );
-        if (accepted.length < MIN_PLAYERS) {
+        const minP = minPlayersForMode(room.game_mode || "classic");
+        if (accepted.length < minP) {
           return res.status(400).json({
-            error: `Need at least ${MIN_PLAYERS} accepted players`,
+            error: `Need at least ${minP} player(s) to start`,
           });
         }
 
