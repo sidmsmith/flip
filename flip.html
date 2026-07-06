@@ -365,21 +365,46 @@ async function refreshActiveGameUI() {
   const data = await fetchActiveRoom();
   updateReturnGameUI(!!data?.room_id);
   const banner = document.getElementById("mp-active-game-banner");
+  if (!banner) return data;
+
   if (data?.room_id && document.getElementById("mp-modal").classList.contains("open")) {
-    banner.style.display = "block";
-    const st = data.room.status === "active" ? "in progress" : "waiting to start";
-    document.getElementById("mp-active-game-text").textContent =
-      `You have a game ${st}. Others see you as "In game".`;
-    document.getElementById("mp-invite-btn").disabled = true;
-    document.getElementById("mp-sec-online").style.display = "none";
-    document.getElementById("mp-lobby-list").innerHTML = "";
-    document.getElementById("mp-lobby-status").style.display = "block";
-    document.getElementById("mp-lobby-status").textContent =
-      "Finish or leave your current game before starting a new one.";
-  } else if (banner) {
+    if (data.room.status === "active") {
+      banner.style.display = "block";
+      document.getElementById("mp-active-game-text").textContent =
+        `You have a game in progress. Others see you as "In game".`;
+      document.getElementById("mp-invite-btn").disabled = true;
+      document.getElementById("mp-sec-online").style.display = "none";
+      document.getElementById("mp-lobby-list").innerHTML = "";
+      document.getElementById("mp-lobby-status").style.display = "block";
+      document.getElementById("mp-lobby-status").textContent =
+        "Finish or leave your current game before starting a new one.";
+    } else {
+      banner.style.display = "none";
+    }
+  } else {
     banner.style.display = "none";
   }
   return data;
+}
+
+function showLobbyWaitingView(data) {
+  mpRoomId = data.room_id;
+  mpRole = data.role || localStorage.getItem("flip_room_role") || "player";
+  mpRoomGameMode = data.room?.game_mode || "classic";
+  mpRoomBrutalMode = !!data.room?.brutal_mode;
+  persistActiveRoom(mpRoomId, mpRole);
+  mpSubscribeRoom(mpRoomId);
+  const me = getUsername();
+  const host = data.room.host_username;
+  if (me === host) {
+    mpRenderWaitList(data.players || []);
+    mpShowMpView("waiting");
+  } else {
+    document.getElementById("mp-accepted-msg").textContent =
+      `Waiting for ${host.toUpperCase()} to start the game…`;
+    mpShowMpView("accepted");
+    mpUpdateAccepted(data.players || []);
+  }
 }
 
 function handleRoomAbandoned(abandonedBy) {
@@ -435,17 +460,8 @@ async function returnToActiveGame(data) {
   }
 
   if (data.room.status === "lobby") {
-    const host = data.room.host_username;
-    const me = getUsername();
     document.getElementById("mp-modal").classList.add("open");
-    if (me === host) {
-      mpRenderWaitList(data.players || []);
-      mpShowMpView("waiting");
-    } else {
-      document.getElementById("mp-accepted-msg").textContent =
-        `Waiting for ${host.toUpperCase()} to start the game…`;
-      mpShowMpView("accepted");
-    }
+    showLobbyWaitingView(data);
     showView("home");
     return true;
   }
@@ -628,17 +644,25 @@ function mpShowMpView(v) {
 async function openMpModal() {
   await mpLoadAbly();
   if (!getUsername()) { openUserModal(); return; }
-  const active = await refreshActiveGameUI();
-  if (active?.room_id) {
-    mpShowMpView("lobby");
-    document.getElementById("mp-modal").classList.add("open");
-    mpSubscribeLobby();
-    return;
-  }
-  mpSelectedPlayers.clear();
-  mpShowMpView("lobby");
+  const active = await fetchActiveRoom();
   document.getElementById("mp-modal").classList.add("open");
   mpSubscribeLobby();
+
+  if (active?.room_id) {
+    updateReturnGameUI(true);
+    if (active.room.status === "active") {
+      await refreshActiveGameUI();
+      await returnToActiveGame(active);
+      return;
+    }
+    showLobbyWaitingView(active);
+    await refreshActiveGameUI();
+    return;
+  }
+
+  await refreshActiveGameUI();
+  mpSelectedPlayers.clear();
+  mpShowMpView("lobby");
   mpStartBgHeartbeat();
   mpLobbyRefreshTimer = setInterval(mpLoadLobbyPlayers, 10000);
   mpRenderInvitations();
@@ -774,13 +798,11 @@ function mpRenderWaitList(players) {
     list.appendChild(row);
     if (p.status === "accepted" && p.role !== "host") accepted++;
   });
-  const total = players.filter(p => p.status !== "declined").length;
+  const acceptedCount = players.filter(
+    (p) => p.status === "accepted" || p.role === "host"
+  ).length;
   const minTotal = mpRoomGameMode === "vengeance" ? 2 : 1;
-  const ready =
-    mpRoomGameMode === "classic" && total === 1
-      ? true
-      : players.filter(p => p.status === "accepted" && p.role !== "host").length >= total - 1;
-  document.getElementById("mp-start-btn").disabled = total < minTotal || !ready;
+  document.getElementById("mp-start-btn").disabled = acceptedCount < minTotal;
   const modeEl = document.getElementById("mp-wait-mode");
   if (modeEl) {
     const label = mpRoomGameMode === "vengeance"
@@ -791,10 +813,9 @@ function mpRenderWaitList(players) {
 }
 
 function mpUpdateAccepted(players) {
-  const allReady = players.every(p => p.status === "accepted" || p.role === "host");
-  document.getElementById("mp-accepted-msg").textContent = allReady
-    ? "All players ready! Waiting for host..."
-    : "Waiting for players to accept...";
+  const host = players.find((p) => p.role === "host")?.username || "?";
+  document.getElementById("mp-accepted-msg").textContent =
+    `Waiting for ${host.toUpperCase()} to start the game…`;
 }
 
 async function mpStartGame() {
