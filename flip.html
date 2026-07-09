@@ -236,9 +236,7 @@ function personalizeState(state) {
       turnPlayer?.status === "active";
     state.mustResolveCard = !!(state.pendingResolution?.fromUsername === me);
     state.mustBrutalChoice = !!(state.phase === "brutal_choice" && state.pendingBrutalFlip7?.username === me);
-    state.legalTargets = state.mustResolveAction
-      ? (pending?.canTarget || state.players.filter((p) => p.status !== "busted").map((p) => p.username))
-      : [];
+    state.legalTargets = state.mustResolveAction ? (pending?.canTarget || []) : [];
     return state;
   }
 
