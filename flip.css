@@ -150,7 +150,6 @@ header {
   font-size: 0.8rem;
 }
 
-.score-chip.me { border-color: var(--accent2); }
 .score-chip.turn { box-shadow: 0 0 0 2px var(--accent2); }
 
 .table-area {
@@ -167,7 +166,7 @@ header {
   padding: 12px;
 }
 
-.player-row.me { border-color: var(--accent2); }
+.player-row.turn { border-color: var(--accent2); box-shadow: 0 0 0 1px var(--accent2); }
 .player-row.busted { opacity: 0.5; }
 .player-row.stayed .player-status { color: var(--accent2); }
 .player-row.frozen .player-status { color: #74b9ff; }

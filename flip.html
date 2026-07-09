@@ -983,6 +983,20 @@ function displayRoundPoints(p, phase) {
   return p.tableauScore ?? 0;
 }
 
+/** Local user first, then others in turn order from the active seat. */
+function playersInDisplayOrder(state, me) {
+  const players = state.players || [];
+  const n = players.length;
+  const ordered = [];
+  const mePlayer = players.find((p) => p.username === me);
+  if (mePlayer) ordered.push(mePlayer);
+  for (let i = 0; i < n; i++) {
+    const p = players[(state.turnIndex + i) % n];
+    if (p.username !== me) ordered.push(p);
+  }
+  return ordered.length ? ordered : players;
+}
+
 function setActionButtonStyles(hitActive, stayActive) {
   if (stayActive === undefined) stayActive = hitActive;
   const hitBtn = document.getElementById("hit-btn");
@@ -1038,9 +1052,9 @@ function onGameState(state) {
 
   const sb = document.getElementById("scoreboard");
   sb.innerHTML = "";
-  state.players.forEach(p => {
+  playersInDisplayOrder(state, me).forEach(p => {
     const chip = document.createElement("div");
-    chip.className = "score-chip" + (p.username === me ? " me" : "") + (turnPlayer?.username === p.username && state.phase === "playing" ? " turn" : "");
+    chip.className = "score-chip" + (turnPlayer?.username === p.username && state.phase === "playing" ? " turn" : "");
     chip.textContent = `${p.username.toUpperCase()} (${p.totalScore})`;
     sb.appendChild(chip);
   });
@@ -1050,10 +1064,12 @@ function onGameState(state) {
 
   const table = document.getElementById("table-area");
   table.innerHTML = "";
-  state.players.forEach(p => {
+  const showTurnHighlight = state.phase === "playing" && !!turnPlayer;
+  playersInDisplayOrder(state, me).forEach(p => {
     const pts = displayRoundPoints(p, state.phase);
+    const isTurn = showTurnHighlight && p.username === turnPlayer.username;
     const row = document.createElement("div");
-    row.className = "player-row " + p.status + (p.username === me ? " me" : "");
+    row.className = "player-row " + p.status + (isTurn ? " turn" : "");
     const hdr = document.createElement("div");
     hdr.className = "player-hdr";
     hdr.innerHTML = `<span class="player-name">${p.username.toUpperCase()} (${pts})${p.flip7ThisRound ? " ★ FLIP 7" : ""}${p.hasZero ? " · ZERO" : ""}</span><span class="player-status">${p.status === "busted" ? "busted" : p.status}${p.hasSecondChance ? " · 2nd chance" : ""}</span>`;
