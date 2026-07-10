@@ -379,6 +379,14 @@ function showView(name) {
   document.getElementById("view-home").style.display = name === "home" ? "flex" : "none";
   document.getElementById("view-game").style.display = name === "game" ? "flex" : "none";
   document.getElementById("view-stats").style.display = name === "stats" ? "flex" : "none";
+  if (name === "game") requestAnimationFrame(syncGameDockPadding);
+}
+
+function syncGameDockPadding() {
+  const dock = document.getElementById("game-dock");
+  if (!dock || !document.body.classList.contains("in-game-view")) return;
+  const h = Math.ceil(dock.getBoundingClientRect().height);
+  document.documentElement.style.setProperty("--game-dock-h", `${Math.max(h, 72)}px`);
 }
 
 function updateHomeUser() {
@@ -1327,6 +1335,7 @@ function onGameState(state) {
         `FLIP 3 — hit ${state.forcedHitsRemaining} more time${state.forcedHitsRemaining === 1 ? "" : "s"}`;
     }
   }
+  requestAnimationFrame(syncGameDockPadding);
 }
 
 let swapPickStep = 0;
@@ -1517,6 +1526,12 @@ document.getElementById("stats-back").addEventListener("click", () => showView("
 // ── Init ─────────────────────────────────────────────────────────────────────
 updateHomeUser();
 showView("home");
+
+const gameDockEl = document.getElementById("game-dock");
+if (gameDockEl && typeof ResizeObserver !== "undefined") {
+  new ResizeObserver(() => syncGameDockPadding()).observe(gameDockEl);
+}
+window.addEventListener("resize", syncGameDockPadding);
 
 (async function initApp() {
   const params = new URLSearchParams(location.search);

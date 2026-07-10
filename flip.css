@@ -228,7 +228,12 @@ header {
 }
 
 .game-dock {
-  flex-shrink: 0;
+  position: fixed;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 100%;
+  max-width: 900px;
   z-index: 60;
   background: var(--bg);
   border-top: 1px solid var(--card-border);
@@ -244,8 +249,29 @@ header {
   flex-wrap: nowrap;
   background: transparent;
   border-top: none;
-  max-width: 900px;
   margin: 0 auto;
+}
+
+body.in-game-view {
+  height: 100dvh;
+  max-height: 100dvh;
+  overflow: hidden;
+}
+
+body.in-game-view #app {
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  padding-bottom: 0;
+}
+
+body.in-game-view #view-game {
+  min-height: 0;
+  overflow: hidden;
+}
+
+body.in-game-view .game-scroll {
+  padding-bottom: calc(var(--game-dock-h, 80px) + 12px);
 }
 
 .action-bar .btn { min-width: 120px; padding: 14px 24px; font-size: 1rem; }
