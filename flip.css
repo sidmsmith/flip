@@ -277,6 +277,13 @@ body.in-game-view #app {
   outline-offset: 1px;
 }
 
+.playing-card.card-back {
+  background: linear-gradient(135deg, #2d3436 0%, #636e72 100%);
+  color: #b2bec3;
+  font-size: 1.25rem;
+  border: 2px solid #636e72;
+}
+
 .action-prompt {
   background: var(--surface2);
   border-radius: var(--radius);

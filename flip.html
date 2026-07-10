@@ -1091,6 +1091,13 @@ function onGameState(state) {
       const isBustCard = p.status === "busted" && p.username === bustUser && c.id === bustCardId;
       numRow.appendChild(renderCard(c, { bustCard: isBustCard }));
     });
+    const hiddenCount = p.hiddenCardCount || 0;
+    for (let i = 0; i < hiddenCount; i++) {
+      const back = document.createElement("div");
+      back.className = "playing-card card-back";
+      back.textContent = "?";
+      numRow.appendChild(back);
+    }
     if (modRow.childElementCount) row.appendChild(modRow);
     const cards = numRow;
     if (p.hasSecondChance) {
@@ -1101,7 +1108,7 @@ function onGameState(state) {
       sc.title = "Held — discards on duplicate number";
       cards.appendChild(sc);
     }
-    if (!numbers.length && !modifiers.length && !p.hasSecondChance && p.status === "active") {
+    if (!numbers.length && !modifiers.length && !hiddenCount && !p.hasSecondChance && p.status === "active") {
       const empty = document.createElement("span");
       empty.className = "mp-hint";
       empty.textContent = "No cards yet";
@@ -1158,7 +1165,7 @@ function onGameState(state) {
     tb.innerHTML = "";
     if (pr.type === "flip_four_pick") {
       document.getElementById("action-prompt-text").textContent = "FLIP 4 — choose a player:";
-      state.players.filter(p => p.status !== "busted").forEach(p => {
+      state.players.filter(p => p.status === "active" || p.status === "stayed").forEach(p => {
         const b = document.createElement("button");
         b.className = "btn";
         b.textContent = p.username.toUpperCase();
