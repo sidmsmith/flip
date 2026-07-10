@@ -151,6 +151,13 @@ header {
 }
 
 .score-chip.turn { box-shadow: 0 0 0 2px var(--accent2); }
+.score-banked { color: inherit; }
+.score-projected {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--muted);
+  margin-left: 4px;
+}
 
 .table-area {
   flex: 1;
@@ -267,21 +274,15 @@ body.in-game-view #app {
   position: relative;
 }
 
-.player-row.busted .playing-card {
-  filter: grayscale(0.65) brightness(0.85);
-  opacity: 0.75;
+.player-row.busted .playing-card,
+.playing-card.busted-card {
+  filter: grayscale(0.85) brightness(0.72);
+  opacity: 0.72;
 }
 
 .playing-card.bust-card {
   outline: 3px solid var(--accent);
   outline-offset: 1px;
-}
-
-.playing-card.card-back {
-  background: linear-gradient(135deg, #2d3436 0%, #636e72 100%);
-  color: #b2bec3;
-  font-size: 1.25rem;
-  border: 2px solid #636e72;
 }
 
 .action-prompt {
@@ -294,6 +295,19 @@ body.in-game-view #app {
 .action-prompt p { margin-bottom: 12px; }
 
 .target-btns { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
+
+.target-btns .pick-card-btn.pick-number {
+  background: rgba(107, 203, 119, 0.22);
+  border-color: rgba(107, 203, 119, 0.55);
+  color: #d4f5d9;
+}
+
+.target-btns .pick-card-btn.pick-minus,
+.target-btns .pick-card-btn.pick-mod {
+  background: rgba(239, 68, 68, 0.18);
+  border-color: rgba(239, 68, 68, 0.5);
+  color: #fecaca;
+}
 
 /* Modals */
 .modal-overlay {
