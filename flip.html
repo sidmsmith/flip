@@ -35,15 +35,17 @@
     <div class="scoreboard" id="scoreboard"></div>
     <div class="table-area" id="table-area"></div>
     <div class="deck-info" id="deck-info">Cards in deck: —</div>
-    <div class="action-prompt" id="action-prompt" style="display:none">
-      <p id="action-prompt-text"></p>
-      <div class="target-btns" id="target-btns"></div>
     </div>
-    </div>
-    <div class="action-bar" id="action-bar">
-      <button class="btn btn-stay disabled" id="stay-btn" disabled>STAY</button>
-      <button class="btn btn-hit disabled" id="hit-btn" disabled>HIT</button>
-      <button class="btn btn-primary" id="next-round-btn" style="display:none">NEXT ROUND</button>
+    <div class="game-dock" id="game-dock">
+      <div class="action-prompt" id="action-prompt" style="display:none">
+        <p id="action-prompt-text"></p>
+        <div class="target-btns" id="target-btns"></div>
+      </div>
+      <div class="action-bar" id="action-bar">
+        <button class="btn btn-stay disabled" id="stay-btn" disabled>STAY</button>
+        <button class="btn btn-hit disabled" id="hit-btn" disabled>HIT</button>
+        <button class="btn btn-primary" id="next-round-btn" style="display:none">NEXT ROUND</button>
+      </div>
     </div>
   </div>
 
@@ -72,6 +74,12 @@
       <input id="user-input" type="text" maxlength="32" autocomplete="off" placeholder="ENTER NAME">
       <div class="mp-sec">EXISTING PLAYERS</div>
       <div id="user-chips"></div>
+      <div class="mp-sec">DISPLAY</div>
+      <label class="pref-check">
+        <input type="checkbox" id="pref-follow-turn" checked>
+        Follow turn order — move other players’ tableaus so the current turn is next to yours
+      </label>
+      <p class="pref-hint">Off keeps a fixed order and only highlights whose turn it is.</p>
       <button class="btn btn-primary" id="user-save" style="width:100%">SAVE</button>
     </div>
   </div>
@@ -199,6 +207,15 @@ function updateInviteHint() {
 
 function getUsername() {
   return (localStorage.getItem("flip_username") || "").trim().toLowerCase();
+}
+
+/** When true, other players' rows rotate so the current turn sits under you. */
+function getFollowTurnPref() {
+  return localStorage.getItem("flip_follow_turn") !== "0";
+}
+
+function setFollowTurnPref(on) {
+  localStorage.setItem("flip_follow_turn", on ? "1" : "0");
 }
 
 function updateInviteBtn() {
@@ -535,6 +552,7 @@ async function mpLeaveGame() {
 // ── User ─────────────────────────────────────────────────────────────────────
 function openUserModal() {
   document.getElementById("user-input").value = getUsername();
+  document.getElementById("pref-follow-turn").checked = getFollowTurnPref();
   document.getElementById("user-modal").classList.add("open");
   loadUserChips();
 }
@@ -560,9 +578,12 @@ async function saveUsername() {
   if (!raw) return;
   const next = raw.toLowerCase();
   const previous = getUsername();
+  const followTurn = document.getElementById("pref-follow-turn").checked;
+  setFollowTurnPref(followTurn);
 
   if (previous && next === previous) {
     document.getElementById("user-modal").classList.remove("open");
+    if (gameState) onGameState(gameState);
     return;
   }
 
@@ -1009,12 +1030,20 @@ function appendPickableCardButton(tb, { username, card }, onClick) {
   tb.appendChild(b);
 }
 
-/** Local user first, then others in turn order from the active seat. */
+/** Local user first; others either follow turn order or stay in fixed seat order. */
 function playersInDisplayOrder(state, me) {
   const players = state.players || [];
+  if (!players.length) return players;
+
+  const mePlayer = players.find((p) => p.username === me);
+  const others = players.filter((p) => p.username !== me);
+
+  if (!getFollowTurnPref()) {
+    return mePlayer ? [mePlayer, ...others] : players;
+  }
+
   const n = players.length;
   const ordered = [];
-  const mePlayer = players.find((p) => p.username === me);
   if (mePlayer) ordered.push(mePlayer);
   for (let i = 0; i < n; i++) {
     const p = players[(state.turnIndex + i) % n];

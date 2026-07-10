@@ -227,26 +227,25 @@ header {
   font-size: 0.85rem;
 }
 
-.action-bar {
-  position: fixed;
-  bottom: 0;
-  left: 0;
-  right: 0;
+.game-dock {
+  flex-shrink: 0;
   z-index: 60;
+  background: var(--bg);
+  border-top: 1px solid var(--card-border);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.35);
+}
+
+.action-bar {
   display: flex;
   gap: 12px;
   justify-content: center;
   padding: 12px 16px;
-  padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px));
   flex-wrap: nowrap;
-  background: linear-gradient(to top, var(--bg) 70%, transparent);
-  border-top: 1px solid var(--card-border);
+  background: transparent;
+  border-top: none;
   max-width: 900px;
   margin: 0 auto;
-}
-
-body.in-game-view #app {
-  padding-bottom: calc(80px + env(safe-area-inset-bottom, 0px));
 }
 
 .action-bar .btn { min-width: 120px; padding: 14px 24px; font-size: 1rem; }
@@ -288,13 +287,40 @@ body.in-game-view #app {
 .action-prompt {
   background: var(--surface2);
   border-radius: var(--radius);
-  padding: 16px;
+  margin: 10px 12px 0;
+  padding: 12px 14px;
   text-align: center;
+  max-height: min(42vh, 320px);
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .action-prompt p { margin-bottom: 12px; }
 
 .target-btns { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
+
+.pref-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  font-size: 0.85rem;
+  line-height: 1.35;
+  color: var(--text);
+  cursor: pointer;
+  margin: 4px 0 8px;
+}
+
+.pref-check input {
+  margin-top: 3px;
+  flex-shrink: 0;
+}
+
+.pref-hint {
+  font-size: 0.75rem;
+  color: var(--muted);
+  margin: -4px 0 14px;
+  line-height: 1.35;
+}
 
 .target-btns .pick-card-btn.pick-number {
   background: rgba(107, 203, 119, 0.22);
