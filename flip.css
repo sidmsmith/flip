@@ -167,9 +167,7 @@ header {
 }
 
 .player-row.turn { border-color: var(--accent2); box-shadow: 0 0 0 1px var(--accent2); }
-.player-row.busted { opacity: 0.5; }
-.player-row.stayed .player-status { color: var(--accent2); }
-.player-row.frozen .player-status { color: #74b9ff; }
+.player-row.busted { opacity: 0.85; }
 
 .player-hdr {
   display: flex;
@@ -179,7 +177,17 @@ header {
 }
 
 .player-name { font-weight: 700; text-transform: uppercase; font-size: 0.85rem; }
-.player-status { font-size: 0.75rem; color: var(--muted); }
+.player-status {
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.player-status.status-active { color: #6bcb77; }
+.player-status.status-stayed { color: #fbbf24; }
+.player-status.status-busted { color: #ef4444; }
+.player-status.status-frozen { color: #74b9ff; }
 
 .card-row {
   display: flex;
@@ -255,10 +263,6 @@ body.in-game-view #app {
   color: #6b7280;
 }
 
-.player-row.busted {
-  opacity: 0.85;
-}
-
 .player-row.busted .card-row {
   position: relative;
 }
@@ -266,12 +270,6 @@ body.in-game-view #app {
 .player-row.busted .playing-card {
   filter: grayscale(0.65) brightness(0.85);
   opacity: 0.75;
-}
-
-.player-row.busted .player-name::after {
-  content: " — BUST";
-  color: var(--accent);
-  font-size: 0.75rem;
 }
 
 .playing-card.bust-card {

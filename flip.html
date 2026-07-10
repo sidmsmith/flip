@@ -981,6 +981,13 @@ function displayRoundPoints(p, phase) {
   return p.tableauScore ?? 0;
 }
 
+function formatPlayerStatus(p) {
+  const labels = { active: "ACTIVE", stayed: "STAYED", busted: "BUSTED", frozen: "FROZEN" };
+  let text = labels[p.status] || String(p.status || "").toUpperCase();
+  if (p.hasSecondChance) text += " · 2ND CHANCE";
+  return text;
+}
+
 /** Local user first, then others in turn order from the active seat. */
 function playersInDisplayOrder(state, me) {
   const players = state.players || [];
@@ -1070,7 +1077,7 @@ function onGameState(state) {
     row.className = "player-row " + p.status + (isTurn ? " turn" : "");
     const hdr = document.createElement("div");
     hdr.className = "player-hdr";
-    hdr.innerHTML = `<span class="player-name">${p.username.toUpperCase()} (${pts})${p.flip7ThisRound ? " ★ FLIP 7" : ""}${p.hasZero ? " · ZERO" : ""}</span><span class="player-status">${p.status === "busted" ? "busted" : p.status}${p.hasSecondChance ? " · 2nd chance" : ""}</span>`;
+    hdr.innerHTML = `<span class="player-name">${p.username.toUpperCase()} (${pts})${p.flip7ThisRound ? " ★ FLIP 7" : ""}${p.hasZero ? " · ZERO" : ""}</span><span class="player-status status-${p.status}">${formatPlayerStatus(p)}</span>`;
     row.appendChild(hdr);
     const modRow = document.createElement("div");
     modRow.className = "card-row modifier-row";
