@@ -511,12 +511,46 @@ function handleRoomAbandoned(abandonedBy) {
   showView("home");
   document.getElementById("mp-modal").classList.remove("open");
   document.getElementById("result-modal").classList.remove("open");
+  const banner = document.getElementById("mp-active-game-banner");
+  if (banner) banner.style.display = "none";
+  updateReturnGameUI(false);
   const me = getUsername();
   if (abandonedBy && abandonedBy === me) {
     showToast("You left the game");
   } else {
     showToast(`${(abandonedBy || "Someone").toUpperCase()} left — game ended`);
   }
+}
+
+/** Host cancelled a lobby room (or room abandoned while still in lobby UI). */
+function resetLobbyAfterCancel(by) {
+  // Idempotent: Ably may deliver room-abandoned on both lobby + room channels.
+  if (!mpRoomId && !mpRoomChannel) return;
+  const rid = mpRoomId;
+  clearActiveRoom();
+  gameState = null;
+  gameSynced = false;
+  if (rid) mpPendingInvites = mpPendingInvites.filter(i => i.room_id !== rid);
+  if (mpRoomChannel) {
+    mpRoomChannel.unsubscribe();
+    mpRoomChannel = null;
+  }
+  const banner = document.getElementById("mp-active-game-banner");
+  if (banner) banner.style.display = "none";
+  updateReturnGameUI(false);
+  document.getElementById("result-modal").classList.remove("open");
+  if (isInLobbyModal()) {
+    mpShowMpView("lobby");
+    mpRenderInvitations();
+    mpLoadLobbyPlayers();
+    mpStartBgHeartbeat();
+  } else {
+    document.getElementById("mp-modal").classList.remove("open");
+    showView("home");
+  }
+  const me = getUsername();
+  if (by && by === me) showToast("Lobby cancelled");
+  else if (by) showToast(`${String(by).toUpperCase()} cancelled the lobby`);
 }
 
 async function returnToActiveGame(data) {
@@ -717,12 +751,19 @@ function mpSubscribeLobby() {
     }
   });
   mpLobbyChannel.subscribe("room-abandoned", msg => {
-    const d = JSON.parse(msg.data || "{}");
-    if (d.room_id && mpRoomId === d.room_id) {
-      handleRoomAbandoned(d.abandoned_by);
+    let d = msg.data;
+    if (typeof d === "string") try { d = JSON.parse(d || "{}"); } catch (_) { return; }
+    const rid = d.room_id;
+    if (!rid) return;
+    const hadPending = mpPendingInvites.some(i => i.room_id === rid);
+    mpPendingInvites = mpPendingInvites.filter(i => i.room_id !== rid);
+    if (hadPending) {
+      mpRenderInvitations();
+      showToast("Invite cancelled");
     }
-    mpPendingInvites = mpPendingInvites.filter(i => i.room_id !== d.room_id);
-    mpRenderInvitations();
+    if (mpRoomId === rid) {
+      resetLobbyAfterCancel(d.abandoned_by);
+    }
   });
 }
 
@@ -758,8 +799,13 @@ function mpSubscribeRoom(roomId) {
     showGameOver(d.state, d.winner);
   });
   mpRoomChannel.subscribe("room-abandoned", msg => {
-    const d = JSON.parse(msg.data || "{}");
-    handleRoomAbandoned(d.abandoned_by);
+    let d = msg.data;
+    if (typeof d === "string") try { d = JSON.parse(d || "{}"); } catch (_) { return; }
+    const inActiveGame = !!(
+      gameState && document.getElementById("view-game")?.classList.contains("active")
+    );
+    if (inActiveGame) handleRoomAbandoned(d.abandoned_by);
+    else resetLobbyAfterCancel(d.abandoned_by);
   });
 }
 
@@ -1016,10 +1062,17 @@ async function mpStartGame() {
 }
 
 async function mpCancelRoom() {
-  if (!confirm("Cancel this game? It will end for all players.")) return;
-  await mpLeaveGame();
-  mpShowMpView("lobby");
-  await mpLoadLobbyPlayers();
+  if (!mpRoomId) return;
+  if (!confirm("Cancel this lobby? Invites will be withdrawn for everyone.")) return;
+  const me = getUsername();
+  try {
+    await fetch(ROOM_URL, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "abandon", room_id: mpRoomId, username: me })
+    });
+  } catch (_) {}
+  resetLobbyAfterCancel(me);
 }
 
 document.getElementById("find-game-btn").addEventListener("click", openMpModal);
