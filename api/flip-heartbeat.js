@@ -44,31 +44,54 @@ export default async function handler(req, res) {
     }
 
     if (req.method === "GET") {
+      // Presence for Game Lobby only. Players in an active game are hidden until
+      // they leave/end and open Game Lobby again (restart keeps them out).
       const { rows } = await client.query(
         `
         SELECT
           u.username,
           CASE
-            WHEN busy.username IS NOT NULL THEN 'playing'
+            WHEN rm.role = 'host' AND rm.room_status = 'lobby' THEN 'host'
+            WHEN rm.player_status = 'accepted' AND rm.room_status = 'lobby' THEN 'ready'
+            WHEN rm.player_status = 'invited' AND rm.room_status = 'lobby' THEN 'waiting'
             WHEN l.last_seen > NOW() - $1::INTERVAL THEN 'available'
             ELSE 'offline'
           END AS status
         FROM (
           SELECT username FROM flip_lobby
-        ) u
-        LEFT JOIN flip_lobby l ON l.username = u.username
-        LEFT JOIN (
-          SELECT DISTINCT fp.username
+          UNION
+          SELECT fp.username
           FROM flip_room_players fp
           JOIN flip_rooms fr ON fr.id = fp.room_id
-          WHERE fr.status IN ('lobby', 'active')
+          WHERE fr.status = 'lobby'
             AND fp.status NOT IN ('left', 'declined')
-        ) busy ON busy.username = u.username
+        ) u
+        LEFT JOIN flip_lobby l ON l.username = u.username
+        LEFT JOIN LATERAL (
+          SELECT fr.status AS room_status, fp.role, fp.status AS player_status
+          FROM flip_room_players fp
+          JOIN flip_rooms fr ON fr.id = fp.room_id
+          WHERE fp.username = u.username
+            AND fr.status IN ('lobby', 'active')
+            AND fp.status NOT IN ('left', 'declined')
+          ORDER BY
+            CASE fr.status WHEN 'active' THEN 0 WHEN 'lobby' THEN 1 ELSE 2 END,
+            fr.created_at DESC
+          LIMIT 1
+        ) rm ON true
+        WHERE
+          (rm.room_status IS NULL OR rm.room_status = 'lobby')
+          AND (
+            l.last_seen > NOW() - $1::INTERVAL
+            OR rm.room_status = 'lobby'
+          )
         ORDER BY
           CASE
-            WHEN busy.username IS NULL AND l.last_seen > NOW() - $1::INTERVAL THEN 0
-            WHEN busy.username IS NOT NULL THEN 1
-            ELSE 2
+            WHEN rm.role = 'host' AND rm.room_status = 'lobby' THEN 1
+            WHEN rm.player_status = 'accepted' AND rm.room_status = 'lobby' THEN 1
+            WHEN rm.player_status = 'invited' AND rm.room_status = 'lobby' THEN 2
+            WHEN l.last_seen > NOW() - $1::INTERVAL THEN 0
+            ELSE 3
           END,
           u.username ASC
         `,

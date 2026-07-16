@@ -122,9 +122,12 @@
       </div>
       <div class="modal-body">
         <div id="mp-wait-list"></div>
-        <p class="mp-hint" id="mp-wait-hint">Need 3–6 players to start</p>
+        <p class="mp-hint" id="mp-wait-hint">Need players to start. Select Available players to invite more before starting.</p>
         <p class="mp-hint" id="mp-wait-mode"></p>
-        <button class="btn btn-primary" id="mp-start-btn" style="width:100%" disabled>START GAME</button>
+        <div class="mp-wait-actions" id="mp-wait-actions">
+          <button class="btn btn-primary" id="mp-wait-invite-btn" type="button" style="display:none" disabled>INVITE SELECTED</button>
+          <button class="btn btn-primary" id="mp-start-btn" type="button" disabled>START GAME</button>
+        </div>
       </div>
     </div>
     <div id="mp-v-accepted" style="display:none">
@@ -179,6 +182,8 @@ let mpHeartbeatTimer = null;
 let mpLobbyRefreshTimer = null;
 let mpSelectedPlayers = new Set();
 let mpPendingInvites = [];
+let mpWaitPlayers = [];
+let returningToLobby = false;
 let gameState = null;
 let gameSynced = false;
 let lastNotifiedEventKey = null;
@@ -196,13 +201,14 @@ function updateInviteHint() {
   const mode = selectedGameMode();
   const hint = document.getElementById("mp-invite-hint");
   const wait = document.getElementById("mp-wait-hint");
-  const lobbyNote = "Only players who currently have Game Lobby open appear here. ";
+  const lobbyNote =
+    "Players in Game Lobby appear here. Select Available players to invite. Host / Ready are visible but not selectable. ";
   if (mode === "vengeance") {
     hint.textContent = lobbyNote + "Select 1–5 players (2–6 total including you).";
-    if (wait) wait.textContent = "Need 2–6 players to start";
+    if (wait) wait.textContent = "Need 2–6 accepted players to start. Select Available to invite more.";
   } else {
     hint.textContent = lobbyNote + "Select 0 for solo, or 1–5 players (1–6 total).";
-    if (wait) wait.textContent = "Need 1–6 players to start";
+    if (wait) wait.textContent = "Need 1–6 players to start. Select Available to invite more.";
   }
 }
 
@@ -489,8 +495,11 @@ function showLobbyWaitingView(data) {
   const me = getUsername();
   const host = data.room.host_username;
   if (me === host) {
-    mpRenderWaitList(data.players || []);
+    mpSelectedPlayers = new Set();
+    mpWaitPlayers = data.players || [];
     mpShowMpView("waiting");
+    updateWaitInviteActions();
+    refreshWaiting();
   } else {
     document.getElementById("mp-accepted-msg").textContent =
       `Waiting for ${host.toUpperCase()} to start the game…`;
@@ -765,6 +774,22 @@ function mpSubscribeLobby() {
       resetLobbyAfterCancel(d.abandoned_by);
     }
   });
+  mpLobbyChannel.subscribe("invite-cancelled", msg => {
+    let d = msg.data;
+    if (typeof d === "string") try { d = JSON.parse(d || "{}"); } catch (_) { return; }
+    const rid = d.room_id;
+    if (!rid) return;
+    const hadPending = mpPendingInvites.some(i => i.room_id === rid);
+    mpPendingInvites = mpPendingInvites.filter(i => i.room_id !== rid);
+    if (hadPending) {
+      mpRenderInvitations();
+      showToast(
+        d.reason === "game_started"
+          ? "Invite withdrawn — game already started"
+          : "Invite cancelled"
+      );
+    }
+  });
 }
 
 function mpSubscribeRoom(roomId) {
@@ -772,9 +797,14 @@ function mpSubscribeRoom(roomId) {
   if (mpRoomChannel) mpRoomChannel.unsubscribe();
   mpRoomChannel = mpAbly.channels.get(`flip-room-${roomId}`);
   mpRoomChannel.subscribe("player-status", msg => {
-    const d = JSON.parse(msg.data);
-    if (mpRole === "host") mpRenderWaitList(d.players);
-    else mpUpdateAccepted(d.players);
+    let d = msg.data;
+    if (typeof d === "string") try { d = JSON.parse(d); } catch (_) { return; }
+    if (mpRole === "host") {
+      mpWaitPlayers = d.players || [];
+      renderWaitingList();
+    } else {
+      mpUpdateAccepted(d.players || []);
+    }
   });
   mpRoomChannel.subscribe("game-start", msg => {
     const d = JSON.parse(msg.data);
@@ -887,7 +917,13 @@ async function openMpModal() {
   mpShowMpView("lobby");
   mpStartBgHeartbeat();
   if (mpLobbyRefreshTimer) clearInterval(mpLobbyRefreshTimer);
-  mpLobbyRefreshTimer = setInterval(mpLoadLobbyPlayers, 5000);
+  mpLobbyRefreshTimer = setInterval(() => {
+    if (document.getElementById("mp-v-waiting").style.display !== "none") {
+      renderWaitingList();
+    } else {
+      mpLoadLobbyPlayers();
+    }
+  }, 5000);
   mpRenderInvitations();
   await mpLoadLobbyPlayers();
   updateInviteBtn();
@@ -897,10 +933,197 @@ function closeMpModal() {
   document.getElementById("mp-modal").classList.remove("open");
   clearInterval(mpLobbyRefreshTimer);
   mpLobbyRefreshTimer = null;
-  const waiting =
+  const keeping =
+    !!mpRoomId ||
     document.getElementById("mp-v-waiting").style.display !== "none" ||
     document.getElementById("mp-v-accepted").style.display !== "none";
-  if (!waiting) mpStopBgHeartbeat();
+  if (!keeping) mpStopBgHeartbeat();
+}
+
+function lobbyPresenceLabel(status) {
+  const map = {
+    available: "Available",
+    host: "Host",
+    ready: "✓ Ready",
+    waiting: "Waiting…",
+    offline: "Offline",
+  };
+  return map[status] || status;
+}
+
+function waitStatusLabel(p) {
+  if (p.role === "host") return "Host";
+  const map = {
+    accepted: "✓ Ready",
+    invited: "Waiting…",
+    declined: "Declined",
+    available: "Available",
+    left: "Left",
+    playing: "Playing",
+  };
+  return map[p.status] || p.status;
+}
+
+function lobbyCancelConfirmMessage(players = mpWaitPlayers) {
+  const pending = players.some((p) => p.status === "invited");
+  const guestsReady = players.some(
+    (p) => p.role !== "host" && (p.status === "accepted" || p.status === "playing")
+  );
+  if (pending) return "Cancel this lobby? Pending invites will be withdrawn.";
+  if (guestsReady) return "Cancel this lobby? Accepted players will leave.";
+  return "Cancel this lobby?";
+}
+
+function seatsTakenInLobby(players = mpWaitPlayers) {
+  return players.filter(
+    (p) => p.status === "accepted" || p.status === "invited" || p.role === "host"
+  ).length;
+}
+
+function updateWaitInviteActions() {
+  const actions = document.getElementById("mp-wait-actions");
+  const inviteBtn = document.getElementById("mp-wait-invite-btn");
+  const startBtn = document.getElementById("mp-start-btn");
+  if (!actions || !inviteBtn || !startBtn) return;
+  const has = mpSelectedPlayers.size > 0;
+  actions.classList.toggle("has-invite", has);
+  inviteBtn.style.display = has ? "" : "none";
+  inviteBtn.disabled = !has;
+  startBtn.style.display = has ? "none" : "";
+}
+
+async function returnToGameLobbyNoInvites() {
+  if (returningToLobby) return;
+  returningToLobby = true;
+  const rid = mpRoomId;
+  const me = getUsername();
+  clearActiveRoom();
+  mpWaitPlayers = [];
+  mpSelectedPlayers = new Set();
+  if (mpRoomChannel) {
+    try { mpRoomChannel.unsubscribe(); } catch (_) {}
+    mpRoomChannel = null;
+  }
+  if (rid) {
+    try {
+      await fetch(ROOM_URL, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "abandon", room_id: rid, username: me }),
+      });
+    } catch (_) {}
+  }
+  const banner = document.getElementById("mp-active-game-banner");
+  if (banner) banner.style.display = "none";
+  updateReturnGameUI(false);
+  document.getElementById("mp-modal").classList.add("open");
+  mpShowMpView("lobby");
+  mpRenderInvitations();
+  mpStartBgHeartbeat();
+  await mpLoadLobbyPlayers();
+  updateInviteBtn();
+  showToast("All invites declined — select players to invite again");
+  returningToLobby = false;
+}
+
+async function renderWaitingList() {
+  const list = document.getElementById("mp-wait-list");
+  if (!list || !mpRoomId || mpRole !== "host") return;
+
+  let lobbyAvailable = [];
+  try {
+    const r = await fetch(HEARTBEAT_URL);
+    const d = await r.json();
+    const me = getUsername();
+    lobbyAvailable = (d.players || []).filter(
+      (p) => p.username !== me && p.status === "available"
+    );
+  } catch (_) {}
+
+  const inRoom = new Map(mpWaitPlayers.map((p) => [p.username.toLowerCase(), p]));
+  const rows = [...mpWaitPlayers];
+  for (const p of lobbyAvailable) {
+    if (!inRoom.has(p.username.toLowerCase())) {
+      rows.push({ username: p.username, role: "player", status: "available" });
+    }
+  }
+
+  const selectable = new Set(
+    rows
+      .filter((p) => p.status === "available" || p.status === "declined")
+      .map((p) => p.username.toLowerCase())
+  );
+  for (const u of [...mpSelectedPlayers]) {
+    if (!selectable.has(u)) mpSelectedPlayers.delete(u);
+  }
+
+  const seatsLeft = Math.max(0, MAX_INVITEES + 1 - seatsTakenInLobby());
+  list.innerHTML = "";
+  rows.forEach((p) => {
+    const canSelect = p.status === "available" || p.status === "declined";
+    const row = document.createElement("div");
+    row.className =
+      "mp-wrow" +
+      (canSelect ? " selectable" : "") +
+      (canSelect && mpSelectedPlayers.has(p.username) ? " sel" : "");
+    const stCls =
+      p.status === "declined" ? "mp-wst declined" :
+      p.status === "available" ? "mp-wst available" :
+      p.status === "accepted" || p.role === "host" ? "mp-wst ok" : "mp-wst wait";
+    row.innerHTML = `<span>${p.username.toUpperCase()}${p.role === "host" ? " (HOST)" : ""}</span><span class="${stCls}">${waitStatusLabel(p)}</span>`;
+    if (canSelect) {
+      row.addEventListener("click", () => {
+        if (mpSelectedPlayers.has(p.username)) mpSelectedPlayers.delete(p.username);
+        else if (mpSelectedPlayers.size < Math.max(1, seatsLeft)) mpSelectedPlayers.add(p.username);
+        else showToast("Lobby can hold 6 players total");
+        updateWaitInviteActions();
+        renderWaitingList();
+      });
+    }
+    list.appendChild(row);
+  });
+
+  const acceptedCount = mpWaitPlayers.filter(
+    (p) => p.status === "accepted" || p.role === "host"
+  ).length;
+  const minTotal = mpRoomGameMode === "vengeance" ? 2 : 1;
+  document.getElementById("mp-start-btn").disabled = acceptedCount < minTotal;
+  const modeEl = document.getElementById("mp-wait-mode");
+  if (modeEl) {
+    modeEl.textContent = mpRoomGameMode === "vengeance"
+      ? `Mode: Vengeance${mpRoomBrutalMode ? " (Brutal)" : ""}`
+      : "Mode: Classic";
+  }
+  updateWaitInviteActions();
+  updateInviteHint();
+}
+
+async function refreshWaiting() {
+  if (!mpRoomId || returningToLobby) return;
+  try {
+    const r = await fetch(`${ROOM_URL}?room_id=${mpRoomId}`);
+    const data = await r.json();
+    mpWaitPlayers = data.players || [];
+  } catch (_) {
+    return;
+  }
+
+  const guests = mpWaitPlayers.filter((p) => p.role !== "host");
+  // Classic solo (host only, never invited anyone) — stay on Waiting.
+  if (guests.length) {
+    const hasPending = guests.some((p) => p.status === "invited");
+    const hasAcceptedGuest = guests.some((p) => p.status === "accepted");
+    if (!hasPending && !hasAcceptedGuest) {
+      await returnToGameLobbyNoInvites();
+      return;
+    }
+  }
+  await renderWaitingList();
+}
+
+function mpRenderWaitList(players) {
+  mpWaitPlayers = players || [];
+  renderWaitingList();
 }
 
 async function mpLoadLobbyPlayers() {
@@ -908,32 +1131,44 @@ async function mpLoadLobbyPlayers() {
     const r = await fetch(HEARTBEAT_URL);
     const d = await r.json();
     const me = getUsername();
-    const others = (d.players || []).filter(p => p.username !== me && p.status === "available");
+    const players = (d.players || []).filter((p) => p.status && p.status !== "offline");
+    const inviteable = players.filter((p) => p.username !== me && p.status === "available");
+    for (const u of [...mpSelectedPlayers]) {
+      if (!inviteable.some((p) => p.username === u)) mpSelectedPlayers.delete(u);
+    }
     const statusEl = document.getElementById("mp-lobby-status");
     const secEl = document.getElementById("mp-sec-online");
     const listEl = document.getElementById("mp-lobby-list");
     listEl.innerHTML = "";
-    if (!others.length) {
+    if (!players.length) {
       statusEl.style.display = "block";
-      statusEl.textContent = "No other players in the lobby.";
+      statusEl.textContent = "Looking for players in the lobby...";
       secEl.style.display = "none";
     } else {
       statusEl.style.display = "none";
       secEl.style.display = "block";
-      others.forEach(({ username: p, status }) => {
-        const avail = status === "available";
+      players.forEach((p) => {
+        const isMe = p.username === me;
+        const avail = !isMe && p.status === "available";
         const row = document.createElement("div");
-        row.className = "mp-prow" + (avail && mpSelectedPlayers.has(p) ? " sel" : "") + (avail ? "" : " unavail");
-        row.innerHTML = `<div class="mp-prow-left"><span class="mp-dot ${status}"></span><span class="mp-prow-name">${p.toUpperCase()}</span></div><div><span class="mp-prow-st">${status}</span> <span class="mp-prow-chk">✓</span></div>`;
+        row.className =
+          "mp-prow" +
+          (avail && mpSelectedPlayers.has(p.username) ? " sel" : "") +
+          (avail ? "" : " unavail");
+        const you = isMe ? " (YOU)" : "";
+        row.innerHTML = `<div class="mp-prow-left"><span class="mp-dot ${p.status}"></span><span class="mp-prow-name">${p.username.toUpperCase()}${you}</span></div><div><span class="mp-prow-st">${lobbyPresenceLabel(p.status)}</span> <span class="mp-prow-chk">✓</span></div>`;
         if (avail) {
           row.addEventListener("click", () => {
-            if (mpSelectedPlayers.has(p)) mpSelectedPlayers.delete(p);
+            if (mpSelectedPlayers.has(p.username)) mpSelectedPlayers.delete(p.username);
             else {
-              if (mpSelectedPlayers.size >= 5) { showToast("Max 5 invitees (6 players total)"); return; }
-              mpSelectedPlayers.add(p);
+              if (mpSelectedPlayers.size >= MAX_INVITEES) {
+                showToast("Max 5 invitees (6 players total)");
+                return;
+              }
+              mpSelectedPlayers.add(p.username);
             }
-            row.classList.toggle("sel", mpSelectedPlayers.has(p));
             updateInviteBtn();
+            mpLoadLobbyPlayers();
           });
         }
         listEl.appendChild(row);
@@ -965,11 +1200,18 @@ async function mpAcceptInvite(inv) {
   mpSubscribeRoom(inv.room_id);
   document.getElementById("mp-accepted-msg").textContent = `Waiting for ${inv.host.toUpperCase()} to start...`;
   mpShowMpView("accepted");
-  await fetch(ROOM_URL, {
+  const r = await fetch(ROOM_URL, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ action: "accept", room_id: inv.room_id, username: getUsername() })
   });
+  if (!r.ok) {
+    const d = await r.json().catch(() => ({}));
+    showToast(d.error || "Invite no longer available");
+    clearActiveRoom();
+    mpShowMpView("lobby");
+    await mpLoadLobbyPlayers();
+  }
 }
 
 async function mpDeclineInvite(inv, idx) {
@@ -1007,37 +1249,14 @@ async function mpInvitePlayers() {
   mpRoomBrutalMode = !!d.brutal_mode;
   persistActiveRoom(mpRoomId, mpRole);
   mpSubscribeRoom(mpRoomId);
-  mpRenderWaitList([
+  mpSelectedPlayers = new Set();
+  mpWaitPlayers = [
     { username: getUsername(), role: "host", status: "accepted" },
     ...invitees.map(p => ({ username: p, role: "player", status: "invited" }))
-  ]);
+  ];
   mpShowMpView("waiting");
-}
-
-function mpRenderWaitList(players) {
-  const list = document.getElementById("mp-wait-list");
-  list.innerHTML = "";
-  let accepted = 0;
-  players.forEach(p => {
-    const row = document.createElement("div");
-    row.className = "mp-wrow";
-    const lbl = { accepted: "✓ Ready", invited: "Waiting...", declined: "Declined", playing: "Playing" }[p.status] || p.status;
-    row.innerHTML = `<span>${p.username.toUpperCase()}${p.role === "host" ? " (HOST)" : ""}</span><span class="mp-wst ${p.status === "accepted" ? "ok" : "wait"}">${lbl}</span>`;
-    list.appendChild(row);
-    if (p.status === "accepted" && p.role !== "host") accepted++;
-  });
-  const acceptedCount = players.filter(
-    (p) => p.status === "accepted" || p.role === "host"
-  ).length;
-  const minTotal = mpRoomGameMode === "vengeance" ? 2 : 1;
-  document.getElementById("mp-start-btn").disabled = acceptedCount < minTotal;
-  const modeEl = document.getElementById("mp-wait-mode");
-  if (modeEl) {
-    const label = mpRoomGameMode === "vengeance"
-      ? `Mode: Vengeance${mpRoomBrutalMode ? " (Brutal)" : ""}`
-      : "Mode: Classic";
-    modeEl.textContent = label;
-  }
+  updateWaitInviteActions();
+  await refreshWaiting();
 }
 
 function mpUpdateAccepted(players) {
@@ -1047,6 +1266,17 @@ function mpUpdateAccepted(players) {
 }
 
 async function mpStartGame() {
+  const pending = mpWaitPlayers.filter((p) => p.status === "invited");
+  if (pending.length) {
+    const names = pending.map((p) => p.username.toUpperCase()).join(", ");
+    if (
+      !confirm(
+        `${names} ${pending.length === 1 ? "hasn't" : "haven't"} accepted yet. Start without them? Their invite will be cancelled.`
+      )
+    ) {
+      return;
+    }
+  }
   const r = await fetch(GAME_URL, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
@@ -1063,7 +1293,7 @@ async function mpStartGame() {
 
 async function mpCancelRoom() {
   if (!mpRoomId) return;
-  if (!confirm("Cancel this lobby? Invites will be withdrawn for everyone.")) return;
+  if (!confirm(lobbyCancelConfirmMessage())) return;
   const me = getUsername();
   try {
     await fetch(ROOM_URL, {
@@ -1073,6 +1303,31 @@ async function mpCancelRoom() {
     });
   } catch (_) {}
   resetLobbyAfterCancel(me);
+}
+
+async function mpWaitInviteSelected() {
+  if (!mpRoomId || !mpSelectedPlayers.size) return;
+  const invitees = [...mpSelectedPlayers];
+  const r = await fetch(ROOM_URL, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      action: "invite",
+      room_id: mpRoomId,
+      username: getUsername(),
+      invitees,
+    }),
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) {
+    showToast(d.error || "Could not invite");
+    return;
+  }
+  mpSelectedPlayers = new Set();
+  if (d.players) mpWaitPlayers = d.players;
+  updateWaitInviteActions();
+  await refreshWaiting();
+  showToast(`Invited ${invitees.map((u) => u.toUpperCase()).join(", ")}`);
 }
 
 document.getElementById("find-game-btn").addEventListener("click", openMpModal);
@@ -1090,6 +1345,7 @@ document.getElementById("mp-leave-active-btn").addEventListener("click", mpLeave
 document.getElementById("mp-close").addEventListener("click", closeMpModal);
 document.getElementById("mp-invite-btn").addEventListener("click", mpInvitePlayers);
 document.getElementById("mp-start-btn").addEventListener("click", mpStartGame);
+document.getElementById("mp-wait-invite-btn").addEventListener("click", mpWaitInviteSelected);
 document.getElementById("mp-cancel-btn").addEventListener("click", mpCancelRoom);
 
 // ── Game UI ──────────────────────────────────────────────────────────────────

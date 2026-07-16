@@ -427,6 +427,8 @@ body.in-game-view .game-scroll {
 .mp-prow-left { display: flex; align-items: center; gap: 8px; }
 .mp-dot { width: 8px; height: 8px; border-radius: 50%; }
 .mp-dot.available { background: #6bcb77; }
+.mp-dot.host, .mp-dot.ready { background: var(--accent2); }
+.mp-dot.waiting { background: #f0c040; }
 .mp-dot.playing { background: var(--accent); }
 .mp-dot.offline { background: var(--muted); }
 
@@ -456,10 +458,25 @@ body.in-game-view .game-scroll {
   border-bottom: 1px solid var(--card-border);
   font-size: 0.85rem;
 }
+.mp-wrow.selectable { cursor: pointer; }
+.mp-wrow.sel { background: rgba(78,205,196,0.1); border-radius: 6px; padding-left: 8px; padding-right: 8px; }
 
 .mp-wst.ok { color: #6bcb77; }
 .mp-wst.wait { color: var(--muted); }
 .mp-wst.no { color: var(--accent); }
+.mp-wst.declined { color: #ef4444; }
+.mp-wst.available { color: var(--accent2); }
+
+.mp-wait-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+  width: 100%;
+}
+.mp-wait-actions .btn {
+  flex: 1 1 100%;
+  width: 100%;
+}
 
 #user-input {
   width: 100%;

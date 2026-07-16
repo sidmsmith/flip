@@ -1,5 +1,5 @@
 import { getPool, cors, ensureFlipTables } from "./db.js";
-import { ablyPublish, roomChannel } from "./ably.js";
+import { ablyPublish, LOBBY_CHANNEL, roomChannel } from "./ably.js";
 import {
   createInitialState,
   applyAction,
@@ -103,6 +103,8 @@ export default async function handler(req, res) {
           });
         }
 
+        const pendingInvitees = players.filter((p) => p.status === "invited");
+
         const usernames = accepted
           .sort((a, b) => (a.seat_index ?? 0) - (b.seat_index ?? 0))
           .map((p) => p.username);
@@ -127,10 +129,23 @@ export default async function handler(req, res) {
            WHERE room_id=$1 AND role='host'`,
           [room_id]
         );
+        if (pendingInvitees.length) {
+          await client.query(
+            `UPDATE flip_room_players SET status='left'
+             WHERE room_id=$1 AND status='invited'`,
+            [room_id]
+          );
+          await ablyPublish(LOBBY_CHANNEL, "invite-cancelled", {
+            room_id,
+            reason: "game_started",
+            invitees: pendingInvitees.map((p) => p.username),
+          });
+        }
 
         const payload = {
           room_id,
           state: publicState(gameState),
+          cancelled_invites: pendingInvitees.map((p) => p.username),
         };
         await ablyPublish(roomChannel(room_id), "game-start", payload);
         await ablyPublish(roomChannel(room_id), "state-update", payload);
