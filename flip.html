@@ -20,7 +20,7 @@
     <div class="home-title">Push Your Luck</div>
     <p class="home-sub">Collect 7 unique numbers to Flip 7. First to 200 points wins. Classic: 1–6 players. Vengeance: 2–6 players.</p>
     <div class="user-badge" id="home-user">Set your name to play</div>
-    <button class="btn btn-primary" id="find-game-btn">FIND GAME</button>
+    <button class="btn btn-primary" id="find-game-btn">GAME LOBBY</button>
     <button class="btn btn-accent" id="return-game-btn" style="display:none">RETURN TO GAME</button>
   </div>
 
@@ -90,7 +90,7 @@
   <div class="modal-card">
     <div id="mp-v-lobby">
       <div class="modal-hdr">
-        <span class="modal-title">FIND GAME</span>
+        <span class="modal-title">GAME LOBBY</span>
         <button class="modal-x" id="mp-close">✕</button>
       </div>
       <div class="modal-body">
@@ -102,10 +102,10 @@
           </div>
         </div>
         <div id="mp-inv-area"></div>
-        <div class="mp-hint" id="mp-lobby-status">Looking for players...</div>
-        <div class="mp-sec" id="mp-sec-online" style="display:none">ONLINE NOW</div>
+        <div class="mp-hint" id="mp-lobby-status">Looking for players in the lobby...</div>
+        <div class="mp-sec" id="mp-sec-online" style="display:none">IN LOBBY NOW</div>
         <div id="mp-lobby-list"></div>
-        <p class="mp-hint" id="mp-invite-hint">Select at least 2 players (3–6 total including you).</p>
+        <p class="mp-hint" id="mp-invite-hint">Only players who currently have Game Lobby open appear here. Select at least 2 players (3–6 total including you).</p>
         <div class="mp-mode-pick" id="mp-mode-pick">
           <div class="mp-hint">GAME MODE</div>
           <label class="mp-mode-opt"><input type="radio" name="game-mode" value="classic" checked> Classic Flip 7</label>
@@ -196,11 +196,12 @@ function updateInviteHint() {
   const mode = selectedGameMode();
   const hint = document.getElementById("mp-invite-hint");
   const wait = document.getElementById("mp-wait-hint");
+  const lobbyNote = "Only players who currently have Game Lobby open appear here. ";
   if (mode === "vengeance") {
-    hint.textContent = "Select 1–5 players (2–6 total including you).";
+    hint.textContent = lobbyNote + "Select 1–5 players (2–6 total including you).";
     if (wait) wait.textContent = "Need 2–6 players to start";
   } else {
-    hint.textContent = "Select 0 for solo, or 1–5 players (1–6 total).";
+    hint.textContent = lobbyNote + "Select 0 for solo, or 1–5 players (1–6 total).";
     if (wait) wait.textContent = "Need 1–6 players to start";
   }
 }
@@ -418,15 +419,34 @@ async function fetchActiveRoom() {
   try {
     const r = await fetch(`${ROOM_URL}?username=${encodeURIComponent(u)}`);
     const d = await r.json();
-    if (!d.room_id) return null;
+    if (!d.room_id) {
+      return { room_id: null, pending_invites: d.pending_invites || [] };
+    }
     if (d.room.status === "complete" || d.room.status === "abandoned") {
       clearActiveRoom();
-      return null;
+      return { room_id: null, pending_invites: d.pending_invites || [] };
     }
     return d;
   } catch (_) {
     return null;
   }
+}
+
+function mergePendingInvites(invites) {
+  const byRoom = new Map();
+  for (const inv of [...mpPendingInvites, ...(invites || [])]) {
+    if (!inv?.room_id) continue;
+    byRoom.set(inv.room_id, {
+      room_id: inv.room_id,
+      host: inv.host,
+      invitee: inv.invitee || getUsername(),
+    });
+  }
+  mpPendingInvites = [...byRoom.values()];
+}
+
+function isInLobbyModal() {
+  return document.getElementById("mp-modal").classList.contains("open");
 }
 
 function updateReturnGameUI(hasActive) {
@@ -636,8 +656,10 @@ async function saveUsername() {
   try {
     await mpLoadAbly();
     mpSubscribeLobby();
-    mpStartBgHeartbeat();
-    await mpSendHeartbeat(previous && previous !== next ? previous : null);
+    if (document.getElementById("mp-modal").classList.contains("open")) {
+      mpStartBgHeartbeat();
+      await mpSendHeartbeat(previous && previous !== next ? previous : null);
+    }
   } catch (_) {}
 
   const data = await fetchActiveRoom();
@@ -682,14 +704,17 @@ function mpSubscribeLobby() {
     if (document.getElementById("mp-modal").classList.contains("open")) mpLoadLobbyPlayers();
   });
   mpLobbyChannel.subscribe("invite", msg => {
-    const d = JSON.parse(msg.data);
+    let d = msg.data;
+    if (typeof d === "string") try { d = JSON.parse(d); } catch (_) { return; }
     if (d.invitee !== getUsername()) return;
     if (mpRoomId) return;
-    if (mpPendingInvites.some(i => i.room_id === d.room_id)) return;
-    mpPendingInvites.push({ host: d.host, room_id: d.room_id });
-    mpSubscribeRoom(d.room_id);
-    if (!document.getElementById("mp-modal").classList.contains("open")) openMpModal();
-    else mpRenderInvitations();
+    mergePendingInvites([{ host: d.host, room_id: d.room_id, invitee: d.invitee }]);
+    if (isInLobbyModal()) {
+      mpRenderInvitations();
+      showToast(`${(d.host || "").toUpperCase()} invited you`);
+    } else {
+      showToast(`${(d.host || "").toUpperCase()} invited you — open Game Lobby`);
+    }
   });
   mpLobbyChannel.subscribe("room-abandoned", msg => {
     const d = JSON.parse(msg.data || "{}");
@@ -714,6 +739,7 @@ function mpSubscribeRoom(roomId) {
     const d = JSON.parse(msg.data);
     onGameState(d.state);
     persistActiveRoom(mpRoomId, mpRole);
+    mpStopBgHeartbeat();
     document.getElementById("mp-modal").classList.remove("open");
     showView("game");
   });
@@ -744,8 +770,18 @@ function mpStartBgHeartbeat() {
 }
 
 function mpStopBgHeartbeat() {
-  clearInterval(mpHeartbeatTimer);
-  mpHeartbeatTimer = null;
+  if (mpHeartbeatTimer) {
+    clearInterval(mpHeartbeatTimer);
+    mpHeartbeatTimer = null;
+  }
+  const u = getUsername();
+  if (u) {
+    fetch(HEARTBEAT_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username: u, leave: true }),
+    }).catch(() => {});
+  }
 }
 
 async function mpSendHeartbeat(previousUsername = null) {
@@ -763,8 +799,12 @@ async function mpSendHeartbeat(previousUsername = null) {
 }
 
 document.addEventListener("visibilitychange", () => {
-  if (document.hidden) mpStopBgHeartbeat();
-  else if (getUsername()) mpStartBgHeartbeat();
+  if (document.hidden) {
+    // Keep lobby presence only while Game Lobby is open.
+    if (!isInLobbyModal()) mpStopBgHeartbeat();
+  } else if (getUsername() && isInLobbyModal()) {
+    mpStartBgHeartbeat();
+  }
 });
 
 // ── Lobby ────────────────────────────────────────────────────────────────────
@@ -780,6 +820,7 @@ async function openMpModal() {
   const active = await fetchActiveRoom();
   document.getElementById("mp-modal").classList.add("open");
   mpSubscribeLobby();
+  mergePendingInvites(active?.pending_invites || []);
 
   if (active?.room_id) {
     updateReturnGameUI(true);
@@ -788,8 +829,10 @@ async function openMpModal() {
       await returnToActiveGame(active);
       return;
     }
+    // Accepted/host waiting — not bare invites (those come via pending_invites).
     showLobbyWaitingView(active);
     await refreshActiveGameUI();
+    mpStartBgHeartbeat();
     return;
   }
 
@@ -797,7 +840,8 @@ async function openMpModal() {
   mpSelectedPlayers.clear();
   mpShowMpView("lobby");
   mpStartBgHeartbeat();
-  mpLobbyRefreshTimer = setInterval(mpLoadLobbyPlayers, 10000);
+  if (mpLobbyRefreshTimer) clearInterval(mpLobbyRefreshTimer);
+  mpLobbyRefreshTimer = setInterval(mpLoadLobbyPlayers, 5000);
   mpRenderInvitations();
   await mpLoadLobbyPlayers();
   updateInviteBtn();
@@ -806,6 +850,11 @@ async function openMpModal() {
 function closeMpModal() {
   document.getElementById("mp-modal").classList.remove("open");
   clearInterval(mpLobbyRefreshTimer);
+  mpLobbyRefreshTimer = null;
+  const waiting =
+    document.getElementById("mp-v-waiting").style.display !== "none" ||
+    document.getElementById("mp-v-accepted").style.display !== "none";
+  if (!waiting) mpStopBgHeartbeat();
 }
 
 async function mpLoadLobbyPlayers() {
@@ -813,14 +862,14 @@ async function mpLoadLobbyPlayers() {
     const r = await fetch(HEARTBEAT_URL);
     const d = await r.json();
     const me = getUsername();
-    const others = (d.players || []).filter(p => p.username !== me);
+    const others = (d.players || []).filter(p => p.username !== me && p.status === "available");
     const statusEl = document.getElementById("mp-lobby-status");
     const secEl = document.getElementById("mp-sec-online");
     const listEl = document.getElementById("mp-lobby-list");
     listEl.innerHTML = "";
     if (!others.length) {
       statusEl.style.display = "block";
-      statusEl.textContent = "No other players online.";
+      statusEl.textContent = "No other players in the lobby.";
       secEl.style.display = "none";
     } else {
       statusEl.style.display = "none";
@@ -961,6 +1010,7 @@ async function mpStartGame() {
   if (!r.ok) { showToast(d.error || "Could not start"); return; }
   onGameState(d.state);
   persistActiveRoom(mpRoomId, mpRole);
+  mpStopBgHeartbeat();
   document.getElementById("mp-modal").classList.remove("open");
   showView("game");
 }
@@ -1542,13 +1592,10 @@ window.addEventListener("resize", syncGameDockPadding);
     return;
   }
 
-  try {
-    await mpLoadAbly();
-    mpSubscribeLobby();
-    mpStartBgHeartbeat();
-  } catch (_) {}
+  // Do not heartbeat on the home screen — available only inside Game Lobby.
 
   if (roomFromUrl) {
+    try { await mpLoadAbly(); } catch (_) {}
     mpRoomId = roomFromUrl;
     mpRole = localStorage.getItem("flip_room_role") || "player";
     persistActiveRoom(mpRoomId, mpRole);
@@ -1567,6 +1614,10 @@ window.addEventListener("resize", syncGameDockPadding);
   }
 
   const data = await fetchActiveRoom();
+  if (data?.pending_invites?.length) {
+    mergePendingInvites(data.pending_invites);
+    showToast("You have a game invite — open Game Lobby");
+  }
   if (data?.room_id) {
     updateReturnGameUI(true);
     await returnToActiveGame(data);

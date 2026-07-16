@@ -33,6 +33,13 @@ Open `http://localhost:3000/flip`.
 
 Client uses the Ably subscribe key in `flip.html` (same pattern as Wordle).
 
+## Lobby / invites
+
+- Players only appear as **available** while they have **Game Lobby** open (heartbeat).
+- Closing the lobby removes you from availability immediately.
+- Anyone already in a lobby room or active game is not inviteable.
+- Invites are stored on the server; opening Game Lobby reloads any pending invites (so a missed Ably toast still works).
+
 ## Database tables
 
 Created automatically on first API call:
